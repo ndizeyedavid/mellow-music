@@ -1,0 +1,26 @@
+# Web framework
+flask
+flask-sock
+gevent
+jinja2
+
+# Database
+mysql-connector-python
+pooledMySQL
+
+# Music APIs
+yt-dlp
+spotipy
+
+# Custom packages
+customisedLogs
+rateLimitedQueues
+randomisedString
+autoReRun
+
+# Security / crypto
+cryptography
+bidict
+
+# HTTP
+requests

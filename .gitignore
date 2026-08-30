@@ -1,0 +1,29 @@
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+ENV/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Project runtime
+backend/.venv/
+backend/__pycache__/
+backend/Hidden/
+backend/Temp/
+backend/Static/js/dynamicWebsite.js
+backend/Static/js/hotwire.js
