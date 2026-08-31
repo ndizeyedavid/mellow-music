@@ -1,4 +1,6 @@
 # Web framework
+fastapi
+uvicorn[standard]
 flask
 flask-sock
 gevent
