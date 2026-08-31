@@ -1,9 +1,14 @@
-import type { AlbumItem } from '../data/library';
+import { Link } from "react-router-dom";
+import type { AlbumItem } from "../data/library";
+
+interface AlbumCardProps extends AlbumItem {
+  to?: string;
+}
 
 /** Square album/playlist thumbnail with title, subtitle and label. */
-export function AlbumCard({ image, title, subtitle }: AlbumItem) {
-  return (
-    <article className="w-[200px] shrink-0">
+export function AlbumCard({ image, title, subtitle, to }: AlbumCardProps) {
+  const content = (
+    <>
       <img
         src={image}
         alt={title}
@@ -17,8 +22,16 @@ export function AlbumCard({ image, title, subtitle }: AlbumItem) {
         <p className="line-clamp-2 text-[14px]/[20px] font-semibold text-fg/65">
           {subtitle}
         </p>
-        <p className="text-[10px]/[12px] font-semibold text-subtle">LABEL</p>
+        <p className="text-[10px]/[12px] font-semibold text-subtle">ALBUM</p>
       </div>
-    </article>
+    </>
+  );
+
+  return to ? (
+    <Link to={to} className="w-[200px] shrink-0">
+      {content}
+    </Link>
+  ) : (
+    <article className="w-[200px] shrink-0">{content}</article>
   );
 }
