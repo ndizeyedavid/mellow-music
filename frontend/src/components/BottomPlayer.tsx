@@ -14,8 +14,6 @@ import {
   MdVolumeUp,
   MdMenu,
 } from "react-icons/md";
-import { Icon } from "./Icon";
-import { playerQueue } from "../data/library";
 import type { RepeatMode } from "../hooks/useAudioPlayer";
 import { usePlayer } from "../context/PlayerContext";
 import { formatTime } from "../utils/format";
@@ -144,6 +142,7 @@ function OptionsMenu() {
 export function BottomPlayer() {
   const {
     audioRef,
+    queue,
     currentTrack,
     currentIndex,
     isPlaying,
@@ -197,7 +196,7 @@ export function BottomPlayer() {
           <p className="px-3 py-2 text-[10px]/[12px] font-semibold uppercase tracking-wide text-subtle">
             Up next
           </p>
-          {playerQueue.map((track, i) => {
+          {queue.map((track, i) => {
             const isCurrent = i === currentIndex;
             return (
               <button

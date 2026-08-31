@@ -1,5 +1,5 @@
 import { MdFavorite, MdFavoriteBorder } from "react-icons/md";
-import { artistMap, playerQueue } from "../data/library";
+import { artistById } from "../data/library";
 import { usePlayer } from "../context/PlayerContext";
 import { formatTime } from "../utils/format";
 import { Marquee } from "./Marquee";
@@ -10,19 +10,18 @@ interface NowPlayingPanelProps {
 
 /** Collapsible right-side panel: now playing, about the artist, next in queue. */
 export function NowPlayingPanel({ open }: NowPlayingPanelProps) {
-  const { currentTrack, currentIndex, liked, toggleLike, playFrom } =
+  const { queue, currentTrack, currentIndex, liked, toggleLike, playFrom } =
     usePlayer();
 
-  const artist =
-    artistMap[currentTrack.artist] ?? {
-      name: currentTrack.artist,
-      image: currentTrack.image,
-      description: "Independent artist on Mellow Music.",
-      monthlyListeners: "—",
-      followers: "—",
-    };
+  const artist = artistById(currentTrack.artistId) ?? {
+    name: currentTrack.artist,
+    image: currentTrack.image,
+    bio: "Independent artist on Mellow Music.",
+    monthlyListeners: "—",
+    followers: "—",
+  };
 
-  const upNext = playerQueue
+  const upNext = queue
     .map((track, index) => ({ track, index }))
     .filter(({ index }) => index !== currentIndex);
 
@@ -85,7 +84,7 @@ export function NowPlayingPanel({ open }: NowPlayingPanelProps) {
             {artist.name}
           </h4>
           <p className="mt-1 line-clamp-4 text-[14px]/[20px] text-subtle">
-            {artist.description}
+            {artist.bio}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="rounded-full bg-sidebar px-3 py-1 text-[12px]/[16px] font-medium text-fg">
