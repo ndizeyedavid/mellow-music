@@ -203,10 +203,32 @@ cp .env.example .env
 # make sure Redis is available locally
 # default used by the project:
 # redis://localhost:6379
-
-# run backend
-python backend/_server.py
 ```
+
+### Run the backend
+
+From the project root, activate the environment and start the API server:
+
+```powershell
+# PowerShell
+(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned)
+& ".\.venv\Scripts\Activate.ps1"
+$env:REDIS_URL = "redis://localhost:6379"
+$env:MELLOW_REDIS_URL = "redis://localhost:6379"
+& ".\.venv\Scripts\python.exe" -m uvicorn backend._server:app --host 0.0.0.0 --port 10020
+```
+
+Alternative direct run:
+
+```powershell
+& ".\.venv\Scripts\python.exe" .\backend\_server.py
+```
+
+Then open:
+
+- http://127.0.0.1:10020/
+- http://127.0.0.1:10020/docs
+- http://127.0.0.1:10020/api/search?q=eminem
 
 If you are doing local development, keep the environment values in the root `.env` file. No need to over-engineer it. The app already knows the local pattern.
 
