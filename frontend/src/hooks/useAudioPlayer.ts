@@ -5,6 +5,7 @@ export type RepeatMode = "off" | "all" | "one";
 
 export interface UseAudioPlayer {
   audioRef: React.RefObject<HTMLAudioElement | null>;
+  queue: Track[];
   currentTrack: Track;
   currentIndex: number;
   isPlaying: boolean;
@@ -20,6 +21,7 @@ export interface UseAudioPlayer {
   next: () => void;
   previous: () => void;
   playFrom: (index: number) => void;
+  replaceQueue: (tracks: Track[], startIndex?: number) => void;
   seek: (time: number) => void;
   setVolumeValue: (value: number) => void;
   toggleMute: () => void;
@@ -30,14 +32,15 @@ export interface UseAudioPlayer {
 
 /**
  * Playback state + <audio> wiring for the bottom player.
- * Handles play/pause, track cycling, shuffle, repeat, seek, volume and mute.
+ * Handles play/pause, queue swapping, track cycling, shuffle, repeat, seek, volume and mute.
  */
 export function useAudioPlayer(
-  tracks: Track[],
+  initialTracks: Track[],
   startIndex = 0,
 ): UseAudioPlayer {
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  const [tracks, setTracks] = useState<Track[]>(initialTracks);
   const [index, setIndex] = useState(startIndex);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -107,6 +110,14 @@ export function useAudioPlayer(
     [tracks.length],
   );
 
+  /** Replace the whole queue and start playing the track at startIndex. */
+  const replaceQueue = useCallback((nextTracks: Track[], nextIndex = 0) => {
+    const target = Math.max(0, Math.min(nextIndex, nextTracks.length - 1));
+    isPlayingRef.current = true;
+    setTracks(nextTracks);
+    setIndex(target);
+  }, []);
+
   // One-time wiring of media element events.
   useEffect(() => {
     const audio = audioRef.current;
@@ -152,7 +163,7 @@ export function useAudioPlayer(
     };
   }, [goNext, tracks.length]);
 
-  // Load the track when the index changes (skip if the source is unchanged).
+  // Load the track when the index changes. Same source = just restart playback.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -162,6 +173,9 @@ export function useAudioPlayer(
       audio.load();
       setCurrentTime(0);
       setDuration(0);
+    } else {
+      audio.currentTime = 0;
+      setCurrentTime(0);
     }
     setLiked(false);
     if (isPlayingRef.current) {
@@ -217,6 +231,7 @@ export function useAudioPlayer(
 
   return {
     audioRef,
+    queue: tracks,
     currentTrack: tracks[index],
     currentIndex: index,
     isPlaying,
@@ -232,6 +247,7 @@ export function useAudioPlayer(
     next: goNext,
     previous: goPrevious,
     playFrom,
+    replaceQueue,
     seek,
     setVolumeValue,
     toggleMute,
