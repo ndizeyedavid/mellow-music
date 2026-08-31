@@ -1,3 +1,7 @@
+export * from "./types";
+export * from "./catalog";
+import { songs } from "./catalog";
+
 export type CaptionColor = "accent" | "danger";
 
 export interface ForYouCardData {
@@ -19,86 +23,8 @@ export interface AlbumRow {
   items: AlbumItem[];
 }
 
-export interface Track {
-  title: string;
-  artist: string;
-  album: string;
-  source: string;
-  image: string;
-  duration?: number;
-}
-
-export interface ArtistInfo {
-  name: string;
-  image: string;
-  description: string;
-  monthlyListeners: string;
-  followers: string;
-}
-
-/** Artist profiles shown in the "About the artist" side-panel section. */
-export const artistMap: Record<string, ArtistInfo> = {
-  "The XX": {
-    name: "The XX",
-    image: "/assets/img/for-you-coexist.png",
-    description:
-      "The xx are a minimalist indie pop trio from London. Known for hushed vocals, sparse guitars and moody production, they made their mark with xx, Coexist and I See You.",
-    monthlyListeners: "5.4M",
-    followers: "1.8M",
-  },
-  "The Weeknd": {
-    name: "The Weeknd",
-    image: "/assets/img/for-you-after-hours.png",
-    description:
-      "The Weeknd is a Canadian singer, songwriter and record producer blending R&B, pop and electronic music. Hits span House of Balloons through After Hours and beyond.",
-    monthlyListeners: "92M",
-    followers: "31M",
-  },
-  Moderat: {
-    name: "Moderat",
-    image: "/assets/img/album-moderat.png",
-    description:
-      "Moderat is the Berlin trio formed by Modeselektor and Apparat. Their sound fuses glitchy techno with warm, melodic songwriting across albums like II and III.",
-    monthlyListeners: "2.1M",
-    followers: "890K",
-  },
-};
-
-/** Demo playback queue for the bottom player. */
-export const playerQueue: Track[] = [
-  {
-    title: "Angels",
-    artist: "The XX",
-    album: "Coexist",
-    source: "/demo.mp3",
-    image: "/assets/img/for-you-coexist.png",
-    duration: 233,
-  },
-  {
-    title: "After Hours",
-    artist: "The Weeknd",
-    album: "After Hours",
-    source: "/demo.mp3",
-    image: "/assets/img/for-you-after-hours.png",
-    duration: 233,
-  },
-  {
-    title: "My Mix 1",
-    artist: "Stromae, Angèle, Isaac Delusion and more",
-    album: "For You",
-    source: "/demo.mp3",
-    image: "/assets/img/album-mymix-1.png",
-    duration: 233,
-  },
-  {
-    title: "Moderat III",
-    artist: "Moderat",
-    album: "Moderat III",
-    source: "/demo.mp3",
-    image: "/assets/img/album-moderat.png",
-    duration: 233,
-  },
-];
+/** Default queue used when the app first loads. */
+export const playerQueue = songs.slice(0, 4);
 
 export const forYouCards: ForYouCardData[] = [
   {
