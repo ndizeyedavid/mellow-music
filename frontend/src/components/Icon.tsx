@@ -17,7 +17,6 @@ import {
   MdShuffle,
   MdSkipNext,
   MdSkipPrevious,
-  MdVideoLibrary,
   MdVolumeUp,
 } from "react-icons/md";
 
@@ -27,7 +26,6 @@ const ICONS: Record<string, IconType> = {
   playlists: MdPlaylistPlay,
   albums: MdAlbum,
   tracks: MdMusicNote,
-  videos: MdVideoLibrary,
   artists: MdGroup,
   "arrow-left": MdArrowBack,
   "arrow-right": MdArrowForward,

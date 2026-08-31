@@ -1,38 +1,41 @@
 import type { ReactNode } from "react";
+import { NavLink } from "react-router-dom";
 import { Icon, type IconName } from "./Icon";
+import { albums, playlists } from "../data/library";
 
 interface SidebarLinkProps {
+  to: string;
   label?: string;
   icon?: IconName;
-  active?: boolean;
   large?: boolean;
-  onClick?: () => void;
+  end?: boolean;
 }
 
-/** Reusable sidebar row link (Figma "Sidebar-link" component). */
+/** Reusable sidebar row link rendered as a router NavLink. */
 export function SidebarLink({
+  to,
   label,
   icon,
-  active = false,
   large = false,
-  onClick,
+  end = false,
 }: SidebarLinkProps) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-3 text-left transition-colors ${
-        large ? "text-[16px]/[24px]" : "text-[14px]/[24px]"
-      } font-medium ${active ? "text-accent" : "text-fg hover:bg-white/5"}`}
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        `flex w-full items-center gap-2.5 rounded-lg px-3 py-3 transition-colors ${
+          large ? "text-[16px]/[24px]" : "text-[14px]/[24px]"
+        } font-medium ${isActive ? "text-accent" : "text-fg hover:bg-white/5"}`
+      }
     >
       {icon && (
         <span className="flex h-6 w-6 shrink-0 items-center justify-center">
           <Icon name={icon} size={24} />
         </span>
       )}
-      <span className="min-w-0 truncate">{label}</span>
-    </button>
+      {label && <span className="min-w-0 truncate">{label}</span>}
+    </NavLink>
   );
 }
 
@@ -56,30 +59,17 @@ export function SidebarSection({ heading, children }: SidebarSectionProps) {
 }
 
 const navLinks = [
-  { label: "Home", active: true },
-  { label: "Explore" },
-  { label: "Videos" },
+  { label: "Home", to: "/", end: true },
+  { label: "Explore", to: "/explore" },
+  { label: "Search", to: "/search" },
 ];
 
-const collectionLinks: Array<{ label: string; icon: IconName }> = [
-  { label: "Mixes and Radio", icon: "mixes" },
-  { label: "Playlists", icon: "playlists" },
-  { label: "Albums", icon: "albums" },
-  { label: "Tracks", icon: "tracks" },
-  { label: "Videos", icon: "videos" },
-  { label: "Artists", icon: "artists" },
+const collectionLinks: Array<{ label: string; to: string; icon: IconName }> = [
+  { label: "Playlists", to: "/playlists", icon: "playlists" },
+  { label: "Albums", to: "/albums", icon: "albums" },
+  { label: "Tracks", to: "/tracks", icon: "tracks" },
+  { label: "Artists", to: "/artists", icon: "artists" },
 ];
-
-const playlistLabels = [
-  "",
-  "September",
-  "Clubbing",
-  "Chil story2",
-  "Playlist 342",
-  "",
-];
-
-const importedAlbumLabels = ["", "", "", "", "", ""];
 
 /** User profile row: avatar circle + ellipsis menu (Figma "Sidebar-link" user variant). */
 function UserProfileRow() {
@@ -107,8 +97,9 @@ export function Sidebar() {
         {navLinks.map((link) => (
           <SidebarLink
             key={link.label}
+            to={link.to}
+            end={link.end}
             label={link.label}
-            active={link.active}
             large
           />
         ))}
@@ -116,19 +107,32 @@ export function Sidebar() {
 
       <SidebarSection heading="MY COLLECTION">
         {collectionLinks.map((link) => (
-          <SidebarLink key={link.label} label={link.label} icon={link.icon} />
+          <SidebarLink
+            key={link.label}
+            to={link.to}
+            label={link.label}
+            icon={link.icon}
+          />
         ))}
       </SidebarSection>
 
       <SidebarSection heading="MY PLAYLISTS">
-        {playlistLabels.map((label, i) => (
-          <SidebarLink key={`${label}-${i}`} label={label} />
+        {playlists.map((playlist) => (
+          <SidebarLink
+            key={playlist.id}
+            to={`/playlist/${playlist.id}`}
+            label={playlist.name}
+          />
         ))}
       </SidebarSection>
 
       <SidebarSection heading="Imported Albums">
-        {importedAlbumLabels.map((label, i) => (
-          <SidebarLink key={`${label}-${i}`} label={label} />
+        {albums.map((album) => (
+          <SidebarLink
+            key={album.id}
+            to={`/album/${album.id}`}
+            label={album.title}
+          />
         ))}
       </SidebarSection>
     </aside>
