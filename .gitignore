@@ -27,3 +27,6 @@ backend/Hidden/
 backend/Temp/
 backend/Static/js/dynamicWebsite.js
 backend/Static/js/hotwire.js
+
+# Docs
+frontend/docs/
