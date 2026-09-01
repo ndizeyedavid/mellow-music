@@ -1,8 +1,10 @@
 import { ArtistCard } from "../components/ArtistCard";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { artists } from "../data/library";
 
 /** Grid of all artists. */
 export function ArtistsPage() {
+  useDocumentTitle("Artists");
   return (
     <div className="px-6 pt-6">
       <h1 className="text-2xl/[32px] font-bold text-fg">Artists</h1>

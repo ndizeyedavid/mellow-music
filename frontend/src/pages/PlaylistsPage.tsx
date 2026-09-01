@@ -3,9 +3,11 @@ import { MdAdd, MdDeleteOutline } from "react-icons/md";
 import { PlaylistCard } from "../components/PlaylistCard";
 import { PlaylistForm } from "../components/PlaylistForm";
 import { usePlaylists } from "../context/PlaylistContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 /** Playlist library: create, browse and delete playlists. */
 export function PlaylistsPage() {
+  useDocumentTitle("Playlists");
   const { playlists, createPlaylist, removePlaylist } = usePlaylists();
   const [creating, setCreating] = useState(false);
 

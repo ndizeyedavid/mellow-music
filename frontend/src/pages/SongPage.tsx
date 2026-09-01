@@ -1,8 +1,9 @@
-import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MdFavorite, MdFavoriteBorder, MdPlayArrow } from "react-icons/md";
 import { SongRow } from "../components/SongRow";
 import { usePlayer } from "../context/PlayerContext";
+import { useLibrary } from "../context/LibraryContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { songById, songs } from "../data/library";
 
 /** Song detail: lyrics, production credits, metrics and related songs. */
@@ -10,7 +11,9 @@ export function SongPage() {
   const { id = "" } = useParams();
   const song = songById(id);
   const { currentTrack, isPlaying, replaceQueue, togglePlay } = usePlayer();
-  const [liked, setLiked] = useState(false);
+  const { isSongLiked, toggleLikeSong } = useLibrary();
+  useDocumentTitle(song?.title);
+  const liked = isSongLiked(id);
 
   if (!song) {
     return (
@@ -82,7 +85,7 @@ export function SongPage() {
               type="button"
               aria-label={liked ? "Remove from liked" : "Add to liked"}
               aria-pressed={liked}
-              onClick={() => setLiked((value) => !value)}
+              onClick={() => toggleLikeSong(song.id)}
               className={`cursor-pointer transition-transform hover:scale-110 ${
                 liked ? "text-accent" : "text-fg hover:text-accent"
               }`}

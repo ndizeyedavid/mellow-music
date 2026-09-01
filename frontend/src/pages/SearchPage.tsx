@@ -5,7 +5,9 @@ import { AlbumCard } from "../components/AlbumCard";
 import { ArtistCard } from "../components/ArtistCard";
 import { PlaylistCard } from "../components/PlaylistCard";
 import { GenreCard } from "../components/GenreCard";
+import { EmptyState } from "../components/EmptyState";
 import { usePlayer } from "../context/PlayerContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import {
   albums,
   artistById,
@@ -31,6 +33,7 @@ export function SearchPage() {
   const query = (searchParams.get("q") ?? "").trim();
   const q = query.toLowerCase();
   const [tab, setTab] = useState<Tab>("all");
+  useDocumentTitle(query ? `Search: ${query}` : "Search");
 
   const { currentTrack, isPlaying, replaceQueue } = usePlayer();
 
@@ -188,20 +191,18 @@ export function SearchPage() {
         albumMatches.length === 0 &&
         artistMatches.length === 0 &&
         playlistMatches.length === 0 && (
-          <div className="mt-10 text-center">
-            <p className="text-[16px] font-medium text-fg">
-              No results for “{query}”
-            </p>
-            <p className="mt-1 text-[14px] text-subtle">
-              Check the spelling or try a different search.
-            </p>
-            <Link
-              to="/tracks"
-              className="mt-4 inline-block text-[14px] font-semibold text-accent hover:underline"
-            >
-              Browse all tracks instead
-            </Link>
-          </div>
+          <EmptyState
+            title={`No results for "${query}"`}
+            description="Check the spelling or try a different search."
+            action={
+              <Link
+                to="/tracks"
+                className="inline-block text-[14px] font-semibold text-accent hover:underline"
+              >
+                Browse all tracks instead
+              </Link>
+            }
+          />
         )}
     </div>
   );

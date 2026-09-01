@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   MdFavorite,
@@ -8,6 +7,8 @@ import {
 } from "react-icons/md";
 import { SongRow } from "../components/SongRow";
 import { usePlayer } from "../context/PlayerContext";
+import { useLibrary } from "../context/LibraryContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { albumById, albumSongs, artistById } from "../data/library";
 import { formatTime } from "../utils/format";
 
@@ -16,7 +17,9 @@ export function AlbumPage() {
   const { id = "" } = useParams();
   const album = albumById(id);
   const { currentTrack, isPlaying, replaceQueue } = usePlayer();
-  const [saved, setSaved] = useState(false);
+  const { isAlbumSaved, toggleSaveAlbum } = useLibrary();
+  useDocumentTitle(album?.title);
+  const saved = isAlbumSaved(id);
 
   if (!album) {
     return (
@@ -92,7 +95,7 @@ export function AlbumPage() {
           type="button"
           aria-label={saved ? "Remove from library" : "Save to library"}
           aria-pressed={saved}
-          onClick={() => setSaved((value) => !value)}
+          onClick={() => toggleSaveAlbum(album.id)}
           className={`cursor-pointer transition-transform hover:scale-110 ${
             saved ? "text-accent" : "text-fg hover:text-accent"
           }`}

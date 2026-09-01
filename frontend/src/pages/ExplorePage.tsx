@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { SectionSlider } from "../components/SectionSlider";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { ForYouCard } from "../components/ForYouCard";
 import { AlbumCard } from "../components/AlbumCard";
 import { ArtistCard } from "../components/ArtistCard";
@@ -19,6 +20,7 @@ import {
 
 /** Discovery home: hero, trending tracks, releases, playlists, genres, artists. */
 export function ExplorePage() {
+  useDocumentTitle("Home");
   const { currentTrack, isPlaying, replaceQueue } = usePlayer();
   const { playlists } = usePlaylists();
 

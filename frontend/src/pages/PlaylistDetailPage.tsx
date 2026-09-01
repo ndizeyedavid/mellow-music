@@ -9,9 +9,11 @@ import {
   MdPlayArrow,
 } from "react-icons/md";
 import { SongRow } from "../components/SongRow";
+import { EmptyState } from "../components/EmptyState";
 import { PlaylistForm } from "../components/PlaylistForm";
 import { usePlayer } from "../context/PlayerContext";
 import { usePlaylists } from "../context/PlaylistContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { playlistSongs } from "../data/library";
 import { formatTime } from "../utils/format";
 
@@ -22,8 +24,8 @@ export function PlaylistDetailPage() {
   const { playlists, updatePlaylist, removePlaylist } = usePlaylists();
   const { currentTrack, isPlaying, replaceQueue } = usePlayer();
   const [editing, setEditing] = useState(false);
-
   const playlist = playlists.find((item) => item.id === id);
+  useDocumentTitle(playlist?.name);
   if (!playlist) {
     return (
       <div className="px-6 pt-6 text-center">
@@ -117,9 +119,19 @@ export function PlaylistDetailPage() {
 
       {/* Tracklist */}
       {tracks.length === 0 ? (
-        <p className="mt-10 text-center text-[14px] text-subtle">
-          This playlist is empty. Add some songs from the Tracks page.
-        </p>
+        <EmptyState
+          title="This playlist is empty"
+          description="Add some songs from the Tracks page."
+          action={
+            <button
+              type="button"
+              onClick={() => navigate("/tracks")}
+              className="cursor-pointer rounded-full bg-fg px-5 py-2.5 text-[14px]/[20px] font-semibold text-[#171719] transition-transform hover:scale-105"
+            >
+              Browse tracks
+            </button>
+          }
+        />
       ) : (
         <ul className="mt-6">
           {tracks.map((song, index) => (

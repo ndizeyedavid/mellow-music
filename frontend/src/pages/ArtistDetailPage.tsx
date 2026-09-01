@@ -1,10 +1,11 @@
-import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MdPlayArrow, MdVerified } from "react-icons/md";
 import { SongRow } from "../components/SongRow";
 import { AlbumCard } from "../components/AlbumCard";
 import { ArtistCard } from "../components/ArtistCard";
 import { usePlayer } from "../context/PlayerContext";
+import { useLibrary } from "../context/LibraryContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { albumById, albums, artistById, artists, songs } from "../data/library";
 
 /** Artist profile: hero, verified badge, popular tracks, albums, related artists. */
@@ -12,7 +13,9 @@ export function ArtistDetailPage() {
   const { id = "" } = useParams();
   const artist = artistById(id);
   const { currentTrack, isPlaying, replaceQueue } = usePlayer();
-  const [following, setFollowing] = useState(false);
+  const { isArtistFollowed, toggleFollowArtist } = useLibrary();
+  useDocumentTitle(artist?.name);
+  const following = isArtistFollowed(id);
 
   if (!artist) {
     return (
@@ -78,7 +81,7 @@ export function ArtistDetailPage() {
         <button
           type="button"
           aria-pressed={following}
-          onClick={() => setFollowing((value) => !value)}
+          onClick={() => toggleFollowArtist(artist.id)}
           className={`cursor-pointer rounded-full px-6 py-3 text-[14px]/[20px] font-semibold transition-colors ${
             following
               ? "bg-fg text-[#171719] hover:bg-white/80"

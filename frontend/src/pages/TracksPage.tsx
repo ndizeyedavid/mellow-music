@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MdPlayArrow } from "react-icons/md";
 import { SongRow } from "../components/SongRow";
+import { EmptyState } from "../components/EmptyState";
 import { usePlayer } from "../context/PlayerContext";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { songs } from "../data/library";
 
 type SortKey = "title" | "artist" | "duration" | "popularity";
@@ -16,6 +18,7 @@ const sortOptions: Array<{ id: SortKey; label: string }> = [
 
 /** All-tracks library with sorting, filtering and bulk playback. */
 export function TracksPage() {
+  useDocumentTitle("Tracks");
   const [searchParams, setSearchParams] = useSearchParams();
   const genre = searchParams.get("genre") ?? "";
   const { currentTrack, isPlaying, replaceQueue } = usePlayer();
@@ -133,19 +136,30 @@ export function TracksPage() {
       </div>
 
       {/* Tracklist */}
-      <ul className="mt-4">
-        {visible.map((song, index) => (
-          <SongRow
-            key={song.id}
-            song={song}
-            index={index}
-            isCurrent={currentTrack.id === song.id}
-            isPlaying={isPlaying}
-            onPlay={() => replaceQueue(visible, index)}
-            showPopularity
-          />
-        ))}
-      </ul>
+      {visible.length === 0 ? (
+        <EmptyState
+          title="No tracks found"
+          description={
+            genre
+              ? `Nothing in the "${genre}" genre matches your filters.`
+              : "Try adjusting your search or genre filter."
+          }
+        />
+      ) : (
+        <ul className="mt-4" aria-label="Track list">
+          {visible.map((song, index) => (
+            <SongRow
+              key={song.id}
+              song={song}
+              index={index}
+              isCurrent={currentTrack.id === song.id}
+              isPlaying={isPlaying}
+              onPlay={() => replaceQueue(visible, index)}
+              showPopularity
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
