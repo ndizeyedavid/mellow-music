@@ -120,7 +120,7 @@ The web app is a Vite + React 19 + Tailwind CSS v4 project using `react-router-d
 
 ### Integration behavior
 
-- Dev: Vite proxies `/api` to `http://localhost:10020` (see `vite.config.ts`). Prod: set `VITE_API_BASE_URL`.
+- Dev: the frontend calls the backend directly via `VITE_API_BASE_URL` (e.g. `http://localhost:10020`); CORS is enabled on the backend for the community-first no-auth API. Prod: set `VITE_API_BASE_URL` to the deployed origin.
 - Home + Search are live backend calls; on failure they serve the last cached payload, then the local catalog.
 - A slim `ConnectivityBanner` shows when the network is off or the backend is unreachable.
 - Playback: `playResults` calls `/api/prepare/<name-or-url>` for each result, then streams `/api/audio/<songID>`. If unreachable, tracks fall back to `public/demo.mp3`.
