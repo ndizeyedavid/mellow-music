@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MdChevronRight, MdMenu } from "react-icons/md";
 import { Icon } from "./Icon";
@@ -37,26 +37,16 @@ interface TopNavProps {
 export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Derive the query directly from the URL (single source of truth).
+  // Query comes from the URL (single source of truth).
   const query = new URLSearchParams(location.search).get("q") ?? "";
 
+  // Search runs on Enter only — no live navigation while typing.
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
-    if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    navigate(`/search?q=${encodeURIComponent(query)}`);
-  };
-
-  // Debounce live search so results update shortly after the user stops typing.
-  const debounceRef = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(debounceRef.current), []);
-
-  const updateSearch = (value: string) => {
-    if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    // eslint-disable-next-line react-hooks/immutability
-    debounceRef.current = window.setTimeout(() => {
-      navigate(`/search?q=${encodeURIComponent(value)}`, { replace: true });
-    }, 250);
+    const value = inputRef.current?.value.trim() ?? "";
+    navigate(value ? `/search?q=${encodeURIComponent(value)}` : "/search");
   };
 
   return (
@@ -85,10 +75,12 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
         className="mx-auto flex h-10 w-[389px] max-w-full items-center gap-2.5 rounded-xl border border-border bg-elevated px-2.5 focus-within:border-accent/50"
       >
         <Icon name="search" size={16} />
+        {/* key={query} resyncs the box when the URL query changes (submit / back / direct link). */}
         <input
-          value={query}
-          onChange={(event) => updateSearch(event.target.value)}
-          placeholder="Search songs, artists, albums…"
+          key={query}
+          ref={inputRef}
+          defaultValue={query}
+          placeholder="Search songs, artists, albums… (Enter to search)"
           aria-label="Search"
           className="w-full bg-transparent text-[14px]/[20px] text-fg outline-none placeholder:text-subtle"
         />
