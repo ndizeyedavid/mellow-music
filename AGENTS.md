@@ -26,6 +26,7 @@ The repo root is:
 Important folders:
 
 - `backend/` — actual app code and runtime files
+- `frontend/` — React web app (Vite + React 19 + Tailwind CSS v4)
 - `README.md` — public project overview
 - `.env` — local runtime environment variables for this machine
 - `.env.example` — template for required env vars
@@ -48,7 +49,7 @@ Important runtime files inside `backend/`:
 
 ### 1) Backend-first product
 
-The app is a Python Flask-based service, with gevent used for the WSGI runtime.
+The app is a FastAPI-based service (`backend/_server.py`) served with uvicorn on port `10020` (see `CoreValues.webPort`). It runs with gevent-style async streaming for audio.
 
 The backend is the real product. UI work should not be prioritized over API stability, discovery flow, or cache correctness.
 
@@ -94,13 +95,37 @@ Public API routes are defined in `backend/_server.py`.
 
 Important endpoints:
 
-- `/api/prepare/<string>` — returns a song ID for a provided name or URL
-- `/api/fetch/<songID>` — returns full song metadata
-- `/api/audio/<songID>` — streams the audio payload
-- `/api/home` — returns homepage discovery results
-- `/api/search` — generic search endpoint using query string `q`
+- `/api/prepare/<string>` — returns a song ID for a provided name or URL: `{"ID": "<30-char id>"}`
+- `/api/fetch/<songID>` — returns full song metadata: `{ID, SONG_NAME, YT_ID, SPOTIFY_ID, DURATION, AUDIO_URL, THUMBNAIL, EXPIRY, LYRICS}`
+- `/api/audio/<songID>` — streams the audio payload (`audio/mpeg`), blocking until the song is prepared
+- `/api/home` — homepage discovery results: `{"results": [{id, title, artist, thumbnail, duration, url}]}`
+- `/api/search?q=&max_results=` — generic search endpoint: `{"results": [{id, title, artist, thumbnail, duration, url}]}`
+- `/health` — backend reachability probe: `{"status": "ok"}`
 
 These endpoints are the primary integration points for the web app or future mobile app.
+
+## Frontend (`frontend/`)
+
+The web app is a Vite + React 19 + Tailwind CSS v4 project using `react-router-dom` v7 and `axios`.
+
+### Structure
+
+- `src/api/client.ts` — shared axios instance (`VITE_API_BASE_URL`, empty = same origin)
+- `src/api/music.ts` — typed backend calls + adapters (`getHome`, `searchTracks`, `prepareSong`, `audioUrl`, `toTrack`)
+- `src/api/connectivity.ts` — framework-free online/backend reachability store
+- `src/context/ConnectivityContext.tsx` — React wiring for the store + health pings + `useConnectivity()`
+- `src/context/PlayerContext.tsx` — audio state + `playResults(results, startIndex)` which prepares songs and points the queue at `/api/audio/<ID>`
+- `src/utils/localCache.ts` — localStorage cache (`mellow-cache:*`) for home/search fallback
+- `src/components/` — reusable UI; `src/data/` — local seed catalog used as offline fallback
+
+### Integration behavior
+
+- Dev: Vite proxies `/api` to `http://localhost:10020` (see `vite.config.ts`). Prod: set `VITE_API_BASE_URL`.
+- Home + Search are live backend calls; on failure they serve the last cached payload, then the local catalog.
+- A slim `ConnectivityBanner` shows when the network is off or the backend is unreachable.
+- Playback: `playResults` calls `/api/prepare/<name-or-url>` for each result, then streams `/api/audio/<songID>`. If unreachable, tracks fall back to `public/demo.mp3`.
+- Local state (likes, follows, saved albums, playlists, volume) lives in localStorage only.
+- Verification: `npm run lint` and `npm run build` (TypeScript). No browser-based smoke testing.
 
 ## Environment variables
 
@@ -174,15 +199,10 @@ The server is configured for local port `10020` by default.
 
 ## Web and UI model
 
-This project contains a custom dynamic web system, not a modern React frontend yet.
+Two UIs exist:
 
-The current web setup includes:
-
-- dynamic page rendering from `backend/Hidden/dynamicWebsite.py`
-- HTML templates in `backend/Static/HTML/`
-- file mapping in `backend/Classes/Holders/FileInvolved.py`
-
-Do not assume the frontend is the priority right now.
+- `frontend/` — the modern React web app (Vite + React 19 + Tailwind v4). This is the primary web client and talks to the backend through axios (see "Frontend" above).
+- `backend/Hidden/dynamicWebsite.py` + `backend/Static/HTML/` — the legacy server-rendered pages, still mapped by `backend/Classes/Holders/FileInvolved.py`.
 
 The stated direction is:
 
