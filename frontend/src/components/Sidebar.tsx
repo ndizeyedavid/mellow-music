@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { Icon, type IconName } from "./Icon";
 import { albums, playlists } from "../data/library";
 
@@ -74,23 +74,6 @@ const collectionLinks: Array<{ label: string; to: string; icon: IconName }> = [
   { label: "Artists", to: "/artists", icon: "artists" },
 ];
 
-/** User profile row: avatar circle + ellipsis menu (Figma "Sidebar-link" user variant). */
-function UserProfileRow() {
-  return (
-    <button
-      type="button"
-      className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-3 transition-colors hover:bg-white/5"
-    >
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-avatar">
-        <span className="text-[10px]/[24px] font-medium tracking-[-0.05em] text-subtle">
-          Gi
-        </span>
-      </span>
-      <Icon name="ellipsis" size={24} />
-    </button>
-  );
-}
-
 export function Sidebar() {
   return (
     <aside className="hidden w-60 shrink-0 flex-col gap-8 overflow-y-auto bg-sidebar px-3 pb-8 pt-4 lg:flex">
@@ -103,7 +86,18 @@ export function Sidebar() {
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
-      <UserProfileRow />
+      <Link
+        to="/"
+        onClick={onNavigate}
+        className="block px-3 py-3"
+        aria-label="Mellow Music home"
+      >
+        <img
+          src="/assets/logo.png"
+          alt="Mellow Music"
+          className="h-9 w-9 object-contain"
+        />
+      </Link>
 
       <SidebarSection>
         {navLinks.map((link) => (
