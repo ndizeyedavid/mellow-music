@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SectionSlider } from "../components/SectionSlider";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -7,8 +8,13 @@ import { ArtistCard } from "../components/ArtistCard";
 import { GenreCard } from "../components/GenreCard";
 import { PlaylistCard } from "../components/PlaylistCard";
 import { SongRow } from "../components/SongRow";
+import { PageLoader } from "../components/PageLoader";
 import { usePlayer } from "../context/PlayerContext";
 import { usePlaylists } from "../context/PlaylistContext";
+import { useConnectivity } from "../context/ConnectivityContext";
+import { getHome, toTrack, type BackendResult } from "../api/music";
+import { cacheGet, cacheSet } from "../utils/localCache";
+import type { Track } from "../data/types";
 import {
   albums,
   artistById,
@@ -18,13 +24,47 @@ import {
   songs,
 } from "../data/library";
 
-/** Discovery home: hero, trending tracks, releases, playlists, genres, artists. */
+const HOME_CACHE_KEY = "home";
+
+/** Discovery home: hero, backend trending, releases, playlists, genres, artists. */
 export function ExplorePage() {
   useDocumentTitle("Home");
-  const { currentTrack, isPlaying, replaceQueue } = usePlayer();
+  const { currentTrack, isPlaying, playResults } = usePlayer();
   const { playlists } = usePlaylists();
+  const { networkOnline, backendOnline } = useConnectivity();
 
-  const trending = [...songs].sort((a, b) => b.popularity - a.popularity);
+  const [homeResults, setHomeResults] = useState<BackendResult[] | null>(null);
+  const [homeLoaded, setHomeLoaded] = useState(false);
+  const [usingCache, setUsingCache] = useState(false);
+
+  // Load backend homepage results; fall back to the last good cache on failure.
+  useEffect(() => {
+    let cancelled = false;
+    void getHome().then((results) => {
+      if (cancelled) return;
+      if (results && results.length) {
+        cacheSet(HOME_CACHE_KEY, results);
+        setHomeResults(results);
+        setUsingCache(false);
+      } else {
+        const cached = cacheGet<BackendResult[]>(HOME_CACHE_KEY);
+        setHomeResults(cached?.length ? cached : null);
+        setUsingCache(cached?.length ? true : false);
+      }
+      setHomeLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [networkOnline, backendOnline]);
+
+  const homeLoading = !homeLoaded;
+  const localTrending: Track[] = [...songs].sort(
+    (a, b) => b.popularity - a.popularity,
+  );
+  const trending: Track[] = homeResults?.length
+    ? homeResults.map((result) => toTrack(result, "/demo.mp3"))
+    : localTrending;
   const featuredArtists = artists.slice(0, 6);
 
   return (
@@ -42,26 +82,56 @@ export function ExplorePage() {
             <h2 className="text-[18px]/[24px] font-semibold text-fg">
               Trending Now
             </h2>
-            <Link
-              to="/tracks"
-              className="text-[13px]/[18px] font-medium text-subtle transition-colors hover:text-fg"
-            >
-              See all
-            </Link>
+            <div className="flex items-center gap-4">
+              {usingCache && (
+                <span className="text-[12px]/[16px] font-medium text-subtle">
+                  Cached results
+                </span>
+              )}
+              <Link
+                to="/tracks"
+                className="text-[13px]/[18px] font-medium text-subtle transition-colors hover:text-fg"
+              >
+                See all
+              </Link>
+            </div>
           </div>
-          <ul className="mt-2 px-2 md:px-4">
-            {trending.slice(0, 5).map((song, index) => (
-              <SongRow
-                key={song.id}
-                song={song}
-                index={index}
-                isCurrent={currentTrack.id === song.id}
-                isPlaying={isPlaying}
-                onPlay={() => replaceQueue(trending, index)}
-                showPopularity
-              />
-            ))}
-          </ul>
+          {homeLoading ? (
+            <div className="mt-2 px-2 md:px-4">
+              <PageLoader />
+            </div>
+          ) : (
+            <ul className="mt-2 px-2 md:px-4">
+              {trending.slice(0, 5).map((song, index) => (
+                <SongRow
+                  key={song.id}
+                  song={song}
+                  index={index}
+                  isCurrent={currentTrack.id === song.id}
+                  isPlaying={isPlaying}
+                  onPlay={() => {
+                    if (homeResults?.length) {
+                      void playResults(homeResults, index);
+                    } else {
+                      // Backend offline — play the local catalog as a fallback.
+                      void playResults(
+                        localTrending.map((item) => ({
+                          id: item.id,
+                          title: item.title,
+                          artist: item.artist,
+                          thumbnail: item.image,
+                          duration: item.duration,
+                          url: "",
+                        })),
+                        index,
+                      );
+                    }
+                  }}
+                  showPopularity
+                />
+              ))}
+            </ul>
+          )}
         </section>
 
         <SectionSlider title="New Releases" gap="gap-6">

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { SongRow } from "../components/SongRow";
 import { AlbumCard } from "../components/AlbumCard";
@@ -6,8 +6,12 @@ import { ArtistCard } from "../components/ArtistCard";
 import { PlaylistCard } from "../components/PlaylistCard";
 import { GenreCard } from "../components/GenreCard";
 import { EmptyState } from "../components/EmptyState";
+import { PageLoader } from "../components/PageLoader";
 import { usePlayer } from "../context/PlayerContext";
+import { useConnectivity } from "../context/ConnectivityContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { searchTracks, toTrack, type BackendResult } from "../api/music";
+import { cacheGet, cacheSet } from "../utils/localCache";
 import {
   albums,
   artistById,
@@ -27,7 +31,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: "playlists", label: "Playlists" },
 ];
 
-/** Unified search results grouped by songs, albums, artists and playlists. */
+/** Unified search results: live backend songs + local albums/artists/playlists. */
 export function SearchPage() {
   const [searchParams] = useSearchParams();
   const query = (searchParams.get("q") ?? "").trim();
@@ -35,7 +39,39 @@ export function SearchPage() {
   const [tab, setTab] = useState<Tab>("all");
   useDocumentTitle(query ? `Search: ${query}` : "Search");
 
-  const { currentTrack, isPlaying, replaceQueue } = usePlayer();
+  const { currentTrack, isPlaying, playResults } = usePlayer();
+  const { networkOnline, backendOnline } = useConnectivity();
+
+  const [remoteSongs, setRemoteSongs] = useState<BackendResult[] | null>(null);
+  const [loadedQuery, setLoadedQuery] = useState("");
+  const [usingCache, setUsingCache] = useState(false);
+
+  // Live backend search, falling back to the last good cached results.
+  useEffect(() => {
+    if (!query) return;
+    let cancelled = false;
+    void searchTracks(query, 10).then((results) => {
+      if (cancelled) return;
+      if (results && results.length) {
+        cacheSet(`search:${q}`, results);
+        setRemoteSongs(results);
+        setUsingCache(false);
+      } else {
+        const cached = cacheGet<BackendResult[]>(`search:${q}`);
+        setRemoteSongs(cached?.length ? cached : null);
+        setUsingCache(cached?.length ? true : false);
+      }
+      setLoadedQuery(query);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [query, q, networkOnline, backendOnline]);
+
+  // Only trust results that belong to the current query.
+  const activeRemote = loadedQuery === query ? remoteSongs : null;
+  const searchLoading = loadedQuery !== query;
+  const activeUsingCache = loadedQuery === query && usingCache;
 
   const songMatches = useMemo(
     () =>
@@ -74,6 +110,17 @@ export function SearchPage() {
       ),
     [q],
   );
+
+  // Backend songs win when present; local catalog is the offline fallback.
+  const remoteTracks = useMemo(
+    () =>
+      activeRemote?.length
+        ? activeRemote.map((r) => toTrack(r, "/demo.mp3"))
+        : [],
+    [activeRemote],
+  );
+  const songList = remoteTracks.length ? remoteTracks : songMatches;
+  const hasSongs = remoteTracks.length > 0 || songMatches.length > 0;
 
   // Empty query -> browse everything
   if (!query) {
@@ -121,24 +168,53 @@ export function SearchPage() {
       </div>
 
       {/* Suggestions + results */}
-      {show("songs") && songMatches.length > 0 && (
+      {show("songs") && hasSongs && (
         <section className="mt-6">
-          <h2 className="text-[18px]/[24px] font-semibold text-fg">
-            Songs ({songMatches.length})
-          </h2>
-          <ul className="mt-2">
-            {songMatches.slice(0, 10).map((song, index) => (
-              <SongRow
-                key={song.id}
-                song={song}
-                index={index}
-                isCurrent={currentTrack.id === song.id}
-                isPlaying={isPlaying}
-                onPlay={() => replaceQueue(songMatches, index)}
-                showPopularity
-              />
-            ))}
-          </ul>
+          <div className="flex items-center justify-between">
+            <h2 className="text-[18px]/[24px] font-semibold text-fg">
+              Songs ({songList.length})
+            </h2>
+            {activeUsingCache && (
+              <span className="text-[12px]/[16px] font-medium text-subtle">
+                Cached results
+              </span>
+            )}
+          </div>
+          {searchLoading ? (
+            <div className="mt-2">
+              <PageLoader />
+            </div>
+          ) : (
+            <ul className="mt-2">
+              {songList.slice(0, 10).map((song, index) => (
+                <SongRow
+                  key={song.id}
+                  song={song}
+                  index={index}
+                  isCurrent={currentTrack.id === song.id}
+                  isPlaying={isPlaying}
+                  onPlay={() => {
+                    if (activeRemote?.length) {
+                      void playResults(activeRemote, index);
+                    } else {
+                      void playResults(
+                        songMatches.map((item) => ({
+                          id: item.id,
+                          title: item.title,
+                          artist: item.artist,
+                          thumbnail: item.image,
+                          duration: item.duration,
+                          url: "",
+                        })),
+                        index,
+                      );
+                    }
+                  }}
+                  showPopularity
+                />
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
@@ -187,7 +263,7 @@ export function SearchPage() {
         </section>
       )}
 
-      {songMatches.length === 0 &&
+      {!hasSongs &&
         albumMatches.length === 0 &&
         artistMatches.length === 0 &&
         playlistMatches.length === 0 && (
