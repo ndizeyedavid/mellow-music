@@ -123,6 +123,41 @@ input[type="range"].player-range:focus-visible {
   animation-play-state: paused;
 }
 
+/* Slide-in from the right (mobile now-playing overlay) */
+@keyframes slide-in-left {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.3s ease-out;
+}
+
+/* NProgress route progress bar */
+#nprogress .bar {
+  background: #00ffff !important;
+  height: 3px;
+}
+
+/* Visible focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid #00ffff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+#nprogress .peg {
+  box-shadow: 0 0 10px #00ffff, 0 0 5px #00ffff !important;
+}
+
+#nprogress .spinner {
+  display: none;
+}
+
 .no-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
