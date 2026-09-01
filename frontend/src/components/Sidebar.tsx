@@ -52,7 +52,7 @@ export function SidebarSection({ heading, children }: SidebarSectionProps) {
   return (
     <section className="flex flex-col gap-1">
       {heading && (
-        <h2 className="px-3 pb-1 pt-4 text-[12px]/[12px] font-medium text-subtle">
+        <h2 className="px-3 pb-1 text-[12px]/[12px] font-medium text-subtle">
           {heading}
         </h2>
       )}
@@ -76,7 +76,7 @@ const collectionLinks: Array<{ label: string; to: string; icon: IconName }> = [
 
 export function Sidebar() {
   return (
-    <aside className="hidden w-60 shrink-0 flex-col gap-8 overflow-y-auto bg-sidebar px-3 pb-8 pt-4 lg:flex">
+    <aside className="hidden w-56 shrink-0 flex-col gap-8 overflow-y-auto bg-sidebar px-3 pb-8 pt-4 lg:flex">
       <SidebarContent />
     </aside>
   );
@@ -89,13 +89,14 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <Link
         to="/"
         onClick={onNavigate}
-        className="block px-3 py-3"
+        className="flex items-start justify-center"
         aria-label="Mellow Music home"
       >
         <img
           src="/assets/logo.png"
           alt="Mellow Music"
-          className="h-9 w-9 object-contain"
+          width={145}
+          className=""
         />
       </Link>
 
