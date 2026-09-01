@@ -9,6 +9,7 @@ interface SidebarLinkProps {
   icon?: IconName;
   large?: boolean;
   end?: boolean;
+  onClick?: () => void;
 }
 
 /** Reusable sidebar row link rendered as a router NavLink. */
@@ -18,11 +19,13 @@ export function SidebarLink({
   icon,
   large = false,
   end = false,
+  onClick,
 }: SidebarLinkProps) {
   return (
     <NavLink
       to={to}
       end={end}
+      onClick={onClick}
       className={({ isActive }) =>
         `flex w-full items-center gap-2.5 rounded-lg px-3 py-3 transition-colors ${
           large ? "text-[16px]/[24px]" : "text-[14px]/[24px]"
@@ -91,6 +94,15 @@ function UserProfileRow() {
 export function Sidebar() {
   return (
     <aside className="hidden w-60 shrink-0 flex-col gap-8 overflow-y-auto bg-sidebar px-3 pb-8 pt-4 lg:flex">
+      <SidebarContent />
+    </aside>
+  );
+}
+
+/** Sidebar contents shared by the desktop aside and the mobile drawer. */
+export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <>
       <UserProfileRow />
 
       <SidebarSection>
@@ -101,6 +113,7 @@ export function Sidebar() {
             end={link.end}
             label={link.label}
             large
+            onClick={onNavigate}
           />
         ))}
       </SidebarSection>
@@ -112,6 +125,7 @@ export function Sidebar() {
             to={link.to}
             label={link.label}
             icon={link.icon}
+            onClick={onNavigate}
           />
         ))}
       </SidebarSection>
@@ -122,6 +136,7 @@ export function Sidebar() {
             key={playlist.id}
             to={`/playlist/${playlist.id}`}
             label={playlist.name}
+            onClick={onNavigate}
           />
         ))}
       </SidebarSection>
@@ -132,9 +147,10 @@ export function Sidebar() {
             key={album.id}
             to={`/album/${album.id}`}
             label={album.title}
+            onClick={onNavigate}
           />
         ))}
       </SidebarSection>
-    </aside>
+    </>
   );
 }

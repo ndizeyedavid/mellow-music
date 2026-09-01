@@ -1,8 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   MdCast,
   MdFavorite,
   MdFavoriteBorder,
+  MdKeyboardAlt,
+  MdMenu,
   MdMoreHoriz,
   MdPause,
   MdPlayArrow,
@@ -12,10 +14,11 @@ import {
   MdSkipNext,
   MdSkipPrevious,
   MdVolumeUp,
-  MdMenu,
 } from "react-icons/md";
 import type { RepeatMode } from "../hooks/useAudioPlayer";
 import { usePlayer } from "../context/PlayerContext";
+import { useLibrary } from "../context/LibraryContext";
+import { SafeImage } from "./SafeImage";
 import { formatTime } from "../utils/format";
 
 /* ---- Small UI helpers ---- */
@@ -146,14 +149,15 @@ export function BottomPlayer() {
     currentTrack,
     currentIndex,
     isPlaying,
+    isBuffering,
     currentTime,
     duration,
     volume,
     muted,
     repeat,
     shuffle,
-    liked,
     progress,
+    streamError,
     togglePlay,
     next,
     previous,
@@ -163,16 +167,28 @@ export function BottomPlayer() {
     toggleMute,
     cycleRepeat,
     toggleShuffle,
-    toggleLike,
+    clearStreamError,
   } = usePlayer();
+
+  const { isSongLiked, toggleLikeSong } = useLibrary();
+  const liked = isSongLiked(currentTrack.id);
+
+  // Auto-dismiss stream errors after a moment.
+  useEffect(() => {
+    if (!streamError) return;
+    const timer = setTimeout(clearStreamError, 3500);
+    return () => clearTimeout(timer);
+  }, [streamError, clearStreamError]);
 
   const [queueOpen, setQueueOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [castOn, setCastOn] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const closePopovers = () => {
     setQueueOpen(false);
     setOptionsOpen(false);
+    setShortcutsOpen(false);
   };
 
   const effectiveVolume = muted ? 0 : volume;
@@ -181,8 +197,18 @@ export function BottomPlayer() {
     <footer className="fixed inset-x-0 bottom-0 z-50 flex items-center gap-6 bg-elevated px-4 py-3.5 xl:gap-[112px]">
       <audio ref={audioRef} preload="auto" />
 
+      {/* Stream error toast */}
+      {streamError && (
+        <div
+          role="alert"
+          className="absolute bottom-full left-1/2 z-50 mb-3 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg border border-danger/40 bg-elevated px-4 py-2.5 text-[13px]/[18px] font-medium text-fg shadow-xl-dark"
+        >
+          {streamError}
+        </div>
+      )}
+
       {/* Click-away backdrop for popovers */}
-      {(queueOpen || optionsOpen) && (
+      {(queueOpen || optionsOpen || shortcutsOpen) && (
         <div
           aria-hidden="true"
           onClick={closePopovers}
@@ -245,9 +271,38 @@ export function BottomPlayer() {
         </div>
       )}
 
+      {/* Keyboard shortcuts help */}
+      {shortcutsOpen && (
+        <div className="absolute bottom-full right-0 z-50 mb-3 mr-4 w-64 rounded-xl border border-border bg-elevated p-4 shadow-xl-dark">
+          <p className="text-[10px]/[12px] font-semibold uppercase tracking-wide text-subtle">
+            Keyboard shortcuts
+          </p>
+          <ul className="mt-3 space-y-2 text-[13px]/[18px] text-fg">
+            <li className="flex items-center justify-between">
+              <span>Play / Pause</span>
+              <kbd className="rounded bg-white/10 px-2 py-0.5 text-[11px]">
+                Space
+              </kbd>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Seek ±5s</span>
+              <kbd className="rounded bg-white/10 px-2 py-0.5 text-[11px]">
+                ← →
+              </kbd>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Volume</span>
+              <kbd className="rounded bg-white/10 px-2 py-0.5 text-[11px]">
+                ↑ ↓
+              </kbd>
+            </li>
+          </ul>
+        </div>
+      )}
+
       {/* Left: now playing */}
       <div className="flex min-w-0 shrink-0 items-center gap-4">
-        <img
+        <SafeImage
           src={currentTrack.image}
           alt=""
           className="h-[65px] w-16 shrink-0 rounded-sm object-cover"
@@ -257,7 +312,11 @@ export function BottomPlayer() {
             <span className="max-w-[180px] truncate text-[14px]/[14px] font-semibold tracking-[-0.05em] text-fg">
               {currentTrack.title}
             </span>
-            <ControlButton label="Like" active={liked} onClick={toggleLike}>
+            <ControlButton
+              label="Like"
+              active={liked}
+              onClick={() => toggleLikeSong(currentTrack.id)}
+            >
               {liked ? (
                 <MdFavorite size={16} />
               ) : (
@@ -271,6 +330,7 @@ export function BottomPlayer() {
               onClick={() => {
                 setOptionsOpen((open) => !open);
                 setQueueOpen(false);
+                setShortcutsOpen(false);
               }}
             >
               <MdMoreHoriz size={16} />
@@ -304,7 +364,17 @@ export function BottomPlayer() {
             onClick={togglePlay}
             className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-white text-[#171719] shadow-md-dark transition-transform hover:scale-105"
           >
-            {isPlaying ? <MdPause size={27} /> : <MdPlayArrow size={27} />}
+            {isBuffering ? (
+              <span
+                className="h-5 w-5 animate-spin rounded-full border-2 border-[#171719]/20 border-t-[#171719]"
+                role="status"
+                aria-label="Buffering"
+              />
+            ) : isPlaying ? (
+              <MdPause size={27} />
+            ) : (
+              <MdPlayArrow size={27} />
+            )}
           </button>
           <ControlButton label="Next" onClick={next}>
             <MdSkipNext size={27} />
@@ -382,10 +452,23 @@ export function BottomPlayer() {
           onClick={() => {
             setQueueOpen((open) => !open);
             setOptionsOpen(false);
+            setShortcutsOpen(false);
           }}
           className="hidden sm:block"
         >
           <MdQueueMusic size={24} />
+        </IconButton>
+        <IconButton
+          label="Keyboard shortcuts"
+          open={shortcutsOpen}
+          onClick={() => {
+            setShortcutsOpen((open) => !open);
+            setQueueOpen(false);
+            setOptionsOpen(false);
+          }}
+          className="hidden sm:block"
+        >
+          <MdKeyboardAlt size={24} />
         </IconButton>
         <button
           type="button"
@@ -395,6 +478,7 @@ export function BottomPlayer() {
           onClick={() => {
             setOptionsOpen((open) => !open);
             setQueueOpen(false);
+            setShortcutsOpen(false);
           }}
           className={`hidden h-10 w-10 cursor-pointer items-center justify-center rounded-lg border bg-elevated transition-colors active:scale-90 sm:flex ${
             optionsOpen

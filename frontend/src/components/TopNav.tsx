@@ -1,5 +1,6 @@
+import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MdChevronRight } from "react-icons/md";
+import { MdChevronRight, MdMenu } from "react-icons/md";
 import { Icon } from "./Icon";
 
 /** Round navigation/icon button used in the top bar. */
@@ -30,9 +31,10 @@ function RoundButton({
 interface TopNavProps {
   panelOpen: boolean;
   onTogglePanel: () => void;
+  onToggleNav: () => void;
 }
 
-export function TopNav({ panelOpen, onTogglePanel }: TopNavProps) {
+export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -41,16 +43,32 @@ export function TopNav({ panelOpen, onTogglePanel }: TopNavProps) {
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
     navigate(`/search?q=${encodeURIComponent(query)}`);
   };
 
+  // Debounce live search so results update shortly after the user stops typing.
+  const debounceRef = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(debounceRef.current), []);
+
   const updateSearch = (value: string) => {
-    // Live navigation so results update as you type.
-    navigate(`/search?q=${encodeURIComponent(value)}`, { replace: true });
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    // eslint-disable-next-line react-hooks/immutability
+    debounceRef.current = window.setTimeout(() => {
+      navigate(`/search?q=${encodeURIComponent(value)}`, { replace: true });
+    }, 250);
   };
 
   return (
     <header className="flex h-[70px] shrink-0 items-center gap-2.5 px-6">
+      <button
+        type="button"
+        aria-label="Open menu"
+        onClick={onToggleNav}
+        className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-fg transition-colors hover:bg-white/5 lg:hidden"
+      >
+        <MdMenu size={20} />
+      </button>
       <RoundButton
         icon="arrow-left"
         label="Go back"
