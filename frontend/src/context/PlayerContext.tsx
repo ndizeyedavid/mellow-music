@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { playerQueue } from "../data/library";
+import type { Track } from "../data/types";
 import { useAudioPlayer, type UseAudioPlayer } from "../hooks/useAudioPlayer";
 import {
   audioUrl,
@@ -32,31 +33,46 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [preparing, setPreparing] = useState(false);
 
   /**
-   * Play backend discovery results: prepare each one (name/URL -> song ID),
-   * point its source at /api/audio/<ID> and replace the queue.
-   * Falls back to demo audio when the network/backend is unreachable.
+   * Play backend discovery results. The clicked track is prepared and starts
+   * playing right away; the rest of the queue is prepared in the background
+   * and swapped in when ready. Falls back to demo audio when offline.
    */
   const playResults = useCallback(
     async (results: BackendResult[], startIndex = 0) => {
       if (!results.length) return;
       const online = isNetworkOnline() && isBackendOnline();
+      const target = Math.max(0, Math.min(startIndex, results.length - 1));
       setPreparing(true);
       try {
         if (!online) {
           replaceQueue(
             results.map((result) => toTrack(result, DEMO_SRC)),
-            startIndex,
+            target,
           );
           return;
         }
-        const prepared = await Promise.all(
-          results.map(async (result) => {
-            const input = result.url || `${result.title} ${result.artist}`;
-            const id = await prepareSong(input);
-            return toTrack(result, id ? audioUrl(id) : DEMO_SRC);
-          }),
+        // Prepare the clicked track first so playback starts ASAP.
+        const clicked = results[target];
+        const clickedId = await prepareSong(
+          clicked.url || `${clicked.title} ${clicked.artist}`,
         );
-        replaceQueue(prepared, startIndex);
+        const initial: Track[] = results.map((result, index) =>
+          index === target
+            ? toTrack(result, clickedId ? audioUrl(clickedId) : DEMO_SRC)
+            : toTrack(result, DEMO_SRC),
+        );
+        replaceQueue(initial, target);
+
+        // Fill the remaining sources in the background, then swap in place.
+        void Promise.allSettled(
+          results.map(async (result, index) => {
+            if (index === target) return;
+            const id = await prepareSong(
+              result.url || `${result.title} ${result.artist}`,
+            );
+            initial[index] = toTrack(result, id ? audioUrl(id) : DEMO_SRC);
+          }),
+        ).then(() => replaceQueue(initial, target));
       } finally {
         setPreparing(false);
       }
