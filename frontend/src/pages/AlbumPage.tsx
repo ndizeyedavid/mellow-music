@@ -35,7 +35,11 @@ export function AlbumPage() {
   const artist = artistById(album.artistId);
   const tracks = albumSongs(album);
   const totalDuration = tracks.reduce((sum, track) => sum + track.duration, 0);
-  const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+
+  const playShuffled = () => {
+    const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+    replaceQueue(shuffled, 0);
+  };
 
   return (
     <div className="px-6 pt-6">
@@ -79,7 +83,7 @@ export function AlbumPage() {
         </button>
         <button
           type="button"
-          onClick={() => replaceQueue(shuffled, 0)}
+          onClick={playShuffled}
           className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-elevated px-5 py-3 text-[14px]/[20px] font-semibold text-fg transition-colors hover:bg-white/10"
         >
           <MdShuffle size={18} /> Shuffle

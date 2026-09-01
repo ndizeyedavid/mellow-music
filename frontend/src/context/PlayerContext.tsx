@@ -12,6 +12,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePlayer(): UseAudioPlayer {
   const context = useContext(PlayerContext);
   if (!context) {

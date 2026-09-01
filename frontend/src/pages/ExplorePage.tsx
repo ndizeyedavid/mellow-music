@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import { MdPlayArrow, MdShuffle } from "react-icons/md";
 import { SectionSlider } from "../components/SectionSlider";
 import { ForYouCard } from "../components/ForYouCard";
 import { AlbumCard } from "../components/AlbumCard";
@@ -20,7 +19,7 @@ import {
 
 /** Discovery home: hero, trending tracks, releases, playlists, genres, artists. */
 export function ExplorePage() {
-  const { currentTrack, isPlaying, replaceQueue, toggleShuffle } = usePlayer();
+  const { currentTrack, isPlaying, replaceQueue } = usePlayer();
   const { playlists } = usePlaylists();
 
   const trending = [...songs].sort((a, b) => b.popularity - a.popularity);

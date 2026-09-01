@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MdChevronRight } from "react-icons/md";
 import { Icon } from "./Icon";
@@ -37,12 +36,8 @@ export function TopNav({ panelOpen, onTogglePanel }: TopNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const queryFromUrl = new URLSearchParams(location.search).get("q") ?? "";
-  const [query, setQuery] = useState(queryFromUrl);
-
-  useEffect(() => {
-    setQuery(queryFromUrl);
-  }, [queryFromUrl]);
+  // Derive the query directly from the URL (single source of truth).
+  const query = new URLSearchParams(location.search).get("q") ?? "";
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
@@ -50,7 +45,6 @@ export function TopNav({ panelOpen, onTogglePanel }: TopNavProps) {
   };
 
   const updateSearch = (value: string) => {
-    setQuery(value);
     // Live navigation so results update as you type.
     navigate(`/search?q=${encodeURIComponent(value)}`, { replace: true });
   };
@@ -96,7 +90,7 @@ export function TopNav({ panelOpen, onTogglePanel }: TopNavProps) {
         <MdChevronRight
           size={20}
           className={`transition-transform duration-300 ${
-            panelOpen ? "" : "rotate-180"
+            panelOpen ? "rotate-180" : ""
           }`}
         />
       </button>
