@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --color-surface: #171719;
+  --color-sidebar: #212124;
+  --color-elevated: #1f1f22;
+  --color-fg: #fcfcfc;
+  --color-subtle: #9898a6;
+  --color-accent: #00ffff;
+  --color-danger: #ef2f62;
+  --color-progress: #4c4e54;
+  --color-avatar: #63676f;
+  --color-border: rgb(235 235 255 / 0.05);
+
+  --shadow-xl-dark: 0 8px 28px 0 rgb(0 0 0 / 0.4);
+  --shadow-md-dark: 0 2.2px 5.5px 0 rgb(0 0 0 / 0.1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #171719;
+  color: #fcfcfc;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Force dark native UI (scrollbars, form controls) — no white flashes */
+:root {
+  color-scheme: dark;
+}
+
+/* Dark scrollbars everywhere */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #38383d transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #38383d;
+  border-radius: 999px;
+  border: 2px solid #171719;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #4c4e54;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Player seek / volume sliders */
+input[type="range"].player-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"].player-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #fcfcfc;
+  border: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
+}
+
+input[type="range"].player-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #fcfcfc;
+  border: none;
+}
+
+input[type="range"].player-range:focus-visible {
+  outline: 2px solid #00ffff;
+  outline-offset: 3px;
+}
+
+/* Spotify-style marquee for overflowing text */
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  display: inline-flex;
+  will-change: transform;
+  animation: marquee-scroll 10s linear infinite;
+}
+
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* Slide-in from the right (mobile now-playing overlay) */
+@keyframes slide-in-left {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.3s ease-out;
+}
+
+/* NProgress route progress bar */
+#nprogress .bar {
+  background: #00ffff !important;
+  height: 3px;
+}
+
+/* Visible focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid #00ffff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+#nprogress .peg {
+  box-shadow: 0 0 10px #00ffff, 0 0 5px #00ffff !important;
+}
+
+#nprogress .spinner {
+  display: none;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
