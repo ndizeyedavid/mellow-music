@@ -1,11 +1,6 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, type ReactNode } from "react";
 import { playlists as seed, type Playlist } from "../data/library";
+import { usePersistentState } from "../utils/usePersistentState";
 
 interface PlaylistContextValue {
   playlists: Playlist[];
@@ -25,9 +20,12 @@ const defaultImages = [
   "/assets/img/for-you-if-you-wait.png",
 ];
 
-/** Shared playlist state: create / update / remove across the app. */
+/** Shared playlist state: create / update / remove across the app (persisted). */
 export function PlaylistProvider({ children }: { children: ReactNode }) {
-  const [playlists, setPlaylists] = useState<Playlist[]>(seed);
+  const [playlists, setPlaylists] = usePersistentState<Playlist[]>(
+    "mellow-playlists",
+    seed,
+  );
 
   const createPlaylist = useCallback(
     (values: { name: string; description: string }): Playlist => {
@@ -42,20 +40,26 @@ export function PlaylistProvider({ children }: { children: ReactNode }) {
       setPlaylists((prev) => [playlist, ...prev]);
       return playlist;
     },
-    [],
+    [setPlaylists],
   );
 
-  const updatePlaylist = useCallback((id: string, patch: Partial<Playlist>) => {
-    setPlaylists((prev) =>
-      prev.map((playlist) =>
-        playlist.id === id ? { ...playlist, ...patch } : playlist,
-      ),
-    );
-  }, []);
+  const updatePlaylist = useCallback(
+    (id: string, patch: Partial<Playlist>) => {
+      setPlaylists((prev) =>
+        prev.map((playlist) =>
+          playlist.id === id ? { ...playlist, ...patch } : playlist,
+        ),
+      );
+    },
+    [setPlaylists],
+  );
 
-  const removePlaylist = useCallback((id: string) => {
-    setPlaylists((prev) => prev.filter((playlist) => playlist.id !== id));
-  }, []);
+  const removePlaylist = useCallback(
+    (id: string) => {
+      setPlaylists((prev) => prev.filter((playlist) => playlist.id !== id));
+    },
+    [setPlaylists],
+  );
 
   return (
     <PlaylistContext.Provider
