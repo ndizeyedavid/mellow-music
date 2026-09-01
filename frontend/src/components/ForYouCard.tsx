@@ -1,5 +1,6 @@
 import type { ForYouCardData } from "../data/library";
 import { Icon } from "./Icon";
+import { SafeImage } from "./SafeImage";
 
 /** Large "For You" hero card: image, blurred footer, caption, title, play CTA. */
 export function ForYouCard({
@@ -11,7 +12,7 @@ export function ForYouCard({
 }: ForYouCardData) {
   return (
     <article className="relative h-[375px] w-[255px] shrink-0 overflow-hidden rounded-lg shadow-xl-dark">
-      <img
+      <SafeImage
         src={image}
         alt=""
         className="h-[257px] w-full object-cover"
@@ -19,7 +20,7 @@ export function ForYouCard({
       />
 
       <div className="absolute inset-x-0 bottom-0 h-[118px] overflow-hidden">
-        <img
+        <SafeImage
           src={image}
           alt=""
           aria-hidden

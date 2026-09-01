@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { MdPlayArrow } from "react-icons/md";
+import { SafeImage } from "./SafeImage";
 import type { Playlist } from "../data/library";
 
 /** Playlist card with hover play overlay and track count. */
@@ -10,7 +11,7 @@ export function PlaylistCard({ playlist }: { playlist: Playlist }) {
       className="group w-[200px] shrink-0 rounded-xl p-3 transition-colors hover:bg-white/5"
     >
       <div className="relative w-[176px]">
-        <img
+        <SafeImage
           src={playlist.image}
           alt={playlist.name}
           className="h-[176px] w-[176px] rounded-lg object-cover shadow-lg"

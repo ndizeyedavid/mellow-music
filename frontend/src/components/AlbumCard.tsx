@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { SafeImage } from "./SafeImage";
 import type { AlbumItem } from "../data/library";
 
 interface AlbumCardProps extends AlbumItem {
@@ -9,7 +10,7 @@ interface AlbumCardProps extends AlbumItem {
 export function AlbumCard({ image, title, subtitle, to }: AlbumCardProps) {
   const content = (
     <>
-      <img
+      <SafeImage
         src={image}
         alt={title}
         className="h-[200px] w-[200px] rounded-[3px] object-cover"

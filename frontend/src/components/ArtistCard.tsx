@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { MdVerified } from "react-icons/md";
+import { SafeImage } from "./SafeImage";
 import type { Artist } from "../data/library";
 
 /** Circular artist card with name and follower count. */
@@ -10,7 +11,7 @@ export function ArtistCard({ artist }: { artist: Artist }) {
       className="group w-40 shrink-0 rounded-xl p-3 text-center transition-colors hover:bg-white/5"
     >
       <div className="relative mx-auto w-32">
-        <img
+        <SafeImage
           src={artist.image}
           alt={artist.name}
           className="h-32 w-32 rounded-full object-cover shadow-lg transition-transform group-hover:scale-[1.03]"

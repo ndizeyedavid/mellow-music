@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { MdPause, MdPlayArrow } from "react-icons/md";
 import type { ReactNode } from "react";
+import { SafeImage } from "./SafeImage";
 import type { Track } from "../data/library";
 import { formatTime } from "../utils/format";
 
@@ -28,6 +29,7 @@ export function SongRow({
 }: SongRowProps) {
   return (
     <li
+      aria-current={isCurrent ? "true" : undefined}
       className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_4rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
         showAlbum || showPopularity
           ? "md:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_4rem]"
@@ -64,7 +66,7 @@ export function SongRow({
 
       {/* Title + artist */}
       <div className="flex min-w-0 items-center gap-3">
-        <img
+        <SafeImage
           src={song.image}
           alt=""
           className="h-10 w-10 shrink-0 rounded-md object-cover"
