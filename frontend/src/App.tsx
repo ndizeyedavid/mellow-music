@@ -11,9 +11,11 @@ import {
 } from "./components/NowPlayingPanel";
 import { PageLoader } from "./components/PageLoader";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ConnectivityBanner } from "./components/ConnectivityBanner";
 import { PlayerProvider } from "./context/PlayerContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { LibraryProvider } from "./context/LibraryContext";
+import { ConnectivityProvider } from "./context/ConnectivityContext";
 
 const lazyPage = (
   factory: () => Promise<{ [key: string]: unknown }>,
@@ -93,6 +95,7 @@ function AppShell() {
           onTogglePanel={() => setPanelOpen((open) => !open)}
           onToggleNav={() => setNavOpen((open) => !open)}
         />
+        <ConnectivityBanner />
         <div
           id="main-content"
           ref={mainRef}
@@ -144,13 +147,15 @@ export default function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
-        <PlaylistProvider>
-          <LibraryProvider>
-            <PlayerProvider>
-              <AppShell />
-            </PlayerProvider>
-          </LibraryProvider>
-        </PlaylistProvider>
+        <ConnectivityProvider>
+          <PlaylistProvider>
+            <LibraryProvider>
+              <PlayerProvider>
+                <AppShell />
+              </PlayerProvider>
+            </LibraryProvider>
+          </PlaylistProvider>
+        </ConnectivityProvider>
       </ErrorBoundary>
     </BrowserRouter>
   );

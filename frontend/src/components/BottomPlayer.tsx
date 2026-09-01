@@ -168,6 +168,7 @@ export function BottomPlayer() {
     cycleRepeat,
     toggleShuffle,
     clearStreamError,
+    preparing,
   } = usePlayer();
 
   const { isSongLiked, toggleLikeSong } = useLibrary();
@@ -364,11 +365,11 @@ export function BottomPlayer() {
             onClick={togglePlay}
             className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-white text-[#171719] shadow-md-dark transition-transform hover:scale-105"
           >
-            {isBuffering ? (
+            {preparing || isBuffering ? (
               <span
                 className="h-5 w-5 animate-spin rounded-full border-2 border-[#171719]/20 border-t-[#171719]"
                 role="status"
-                aria-label="Buffering"
+                aria-label={preparing ? "Preparing stream" : "Buffering"}
               />
             ) : isPlaying ? (
               <MdPause size={27} />
