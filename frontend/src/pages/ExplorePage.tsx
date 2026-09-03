@@ -29,7 +29,7 @@ const HOME_CACHE_KEY = "home";
 /** Discovery home: hero, backend trending, releases, playlists, genres, artists. */
 export function ExplorePage() {
   useDocumentTitle("Home");
-  const { currentTrack, isPlaying, playResults } = usePlayer();
+  const { currentTrack, isPlaying, playResults, preparingIds } = usePlayer();
   const { playlists } = usePlaylists();
   const { networkOnline, backendOnline } = useConnectivity();
 
@@ -109,6 +109,7 @@ export function ExplorePage() {
                   index={index}
                   isCurrent={currentTrack.id === song.id}
                   isPlaying={isPlaying}
+                  isLoading={Boolean(preparingIds[song.id])}
                   onPlay={() => {
                     if (homeResults?.length) {
                       void playResults(homeResults, index);

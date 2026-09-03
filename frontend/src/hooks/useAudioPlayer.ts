@@ -61,6 +61,7 @@ export function useAudioPlayer(
   const shuffleRef = useRef(shuffle);
   const isPlayingRef = useRef(isPlaying);
   const volumeRef = useRef(volume);
+  const loadedSourceRef = useRef<string | null>(null);
 
   useEffect(() => {
     indexRef.current = index;
@@ -188,22 +189,24 @@ export function useAudioPlayer(
     };
   }, [goNext, tracks.length]);
 
-  // Load the track when the index changes. Same source = just restart playback.
+  // Load the track when the index changes. Only reload when the source string
+  // actually changes (tracked in a ref) so background queue refills don't call
+  // audio.load() again — which would abort an in-flight play() with an AbortError.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const nextSrc = tracks[index].source;
-    if (audio.src !== new URL(nextSrc, window.location.href).href) {
+    if (loadedSourceRef.current !== nextSrc) {
+      loadedSourceRef.current = nextSrc;
       audio.src = nextSrc;
       audio.load();
       setCurrentTime(0);
       setDuration(0);
-    } else {
-      audio.currentTime = 0;
-      setCurrentTime(0);
     }
     if (isPlayingRef.current) {
-      void audio.play();
+      audio.play().catch(() => {
+        /* swallow AbortError/NotAllowedError; handled via the error event */
+      });
     }
   }, [index, tracks]);
 

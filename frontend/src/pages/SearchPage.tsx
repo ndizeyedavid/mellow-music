@@ -39,7 +39,7 @@ export function SearchPage() {
   const [tab, setTab] = useState<Tab>("all");
   useDocumentTitle(query ? `Search: ${query}` : "Search");
 
-  const { currentTrack, isPlaying, playResults } = usePlayer();
+  const { currentTrack, isPlaying, playResults, preparingIds } = usePlayer();
   const { networkOnline, backendOnline } = useConnectivity();
 
   const [remoteSongs, setRemoteSongs] = useState<BackendResult[] | null>(null);
@@ -193,6 +193,7 @@ export function SearchPage() {
                   index={index}
                   isCurrent={currentTrack.id === song.id}
                   isPlaying={isPlaying}
+                  isLoading={Boolean(preparingIds[song.id])}
                   onPlay={() => {
                     if (activeRemote?.length) {
                       void playResults(activeRemote, index);

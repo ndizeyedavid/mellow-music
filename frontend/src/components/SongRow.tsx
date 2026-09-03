@@ -10,6 +10,7 @@ interface SongRowProps {
   index: number;
   isCurrent?: boolean;
   isPlaying?: boolean;
+  isLoading?: boolean;
   onPlay: () => void;
   showAlbum?: boolean;
   showPopularity?: boolean;
@@ -22,6 +23,7 @@ export function SongRow({
   index,
   isCurrent = false,
   isPlaying = false,
+  isLoading = false,
   onPlay,
   showAlbum = true,
   showPopularity = false,
@@ -38,7 +40,12 @@ export function SongRow({
     >
       {/* Index / play */}
       <span className="flex w-10 justify-center">
-        {isCurrent ? (
+        {isLoading ? (
+          <span
+            aria-label={`Loading ${song.title}`}
+            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-fg/25 border-t-accent"
+          />
+        ) : isCurrent ? (
           <button
             type="button"
             aria-label={isPlaying ? "Pause" : "Play"}

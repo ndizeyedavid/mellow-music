@@ -25,9 +25,12 @@ export interface BackendSong {
   LYRICS: string;
 }
 
-/** Stream endpoint for a prepared song ID. */
+/** Stream endpoint for a prepared song ID. Uses the same backend base as the
+ * API client so the <audio> element hits the backend (not the Vite dev server,
+ * which has no /api proxy and would load index.html and never play). */
 export function audioUrl(songId: string): string {
-  return `/api/audio/${encodeURIComponent(songId)}`;
+  const base = (api.defaults.baseURL ?? "").replace(/\/$/, "");
+  return `${base}/api/audio/${encodeURIComponent(songId)}`;
 }
 
 /** Runs a request, reports reachability to the connectivity store. */
@@ -73,9 +76,19 @@ export async function prepareSong(input: string): Promise<string | null> {
   });
 }
 
+/** Pick the best prepare input for a discovery result: a real YouTube URL if we
+ * have one (exact video), otherwise a clean title + artist query so the backend
+ * can match a fast free-stream source (Audius / Internet Archive) instead of a
+ * Deezer/Apple page link that would mangle into a useless search. */
+export function prepareInput(result: BackendResult): string {
+  const u = result.url || "";
+  if (/youtu\.?be|youtube\.com|music\.youtu/i.test(u)) return u;
+  const text = `${result.title} ${result.artist}`.trim();
+  return text || u;
+}
+
 /** Map a backend discovery result into the player's Track shape. */
-export function toTrack(result: BackendResult, source: string): Track {
-  return {
+export function toTrack(result: BackendResult, source: string): Track {  return {
     id: result.id,
     title: result.title,
     artist: result.artist,
