@@ -11,10 +11,31 @@ from randomisedString import RandomisedString
 
 from Classes.Holders.DBTables import DBTables
 from Classes.Holders.UrlTypes import UrlTypes
+from Classes.Processors.AudiusAPI import AudiusAPI
+from Classes.Processors.InternetArchiveAPI import InternetArchiveAPI
 from Classes.Processors.SongData import SongData
 from Classes.Processors.SpotifyAPI import SpotifyAPICollection
 from Classes.Processors.URLHandler import URLHandler
 from Classes.Processors.YTDLP import YTDLP
+
+
+# #region debug-point setup
+import json as _json, urllib.request as _urllib, time as _time
+_DBG = {"url": "http://127.0.0.1:7777/event", "sid": "slow-first-play"}
+try:
+    with open(".dbg/slow-first-play.env") as _f:
+        for _l in _f.read().splitlines():
+            if _l.startswith("DEBUG_SERVER_URL="): _DBG["url"] = _l.split("=", 1)[1]
+            elif _l.startswith("DEBUG_SESSION_ID="): _DBG["sid"] = _l.split("=", 1)[1]
+except Exception:
+    pass
+def _dbg(run, hyp, loc, msg, **data):
+    try:
+        _p = _json.dumps({"sessionId": _DBG["sid"], "runId": run, "hypothesisId": hyp, "location": loc, "msg": "[DEBUG] " + msg, "data": data, "ts": int(_time.time() * 1000)}).encode()
+        _urllib.urlopen(_urllib.Request(_DBG["url"], data=_p, headers={"Content-Type": "application/json"}), timeout=1).read()
+    except Exception:
+        pass
+# #endregion
 
 
 class SongCache:
@@ -26,6 +47,8 @@ class SongCache:
         self.logger = Logger
         self.cache:dict[str, SongData] = {}
         self.YTDLP = YTDLP(self.logger)
+        self.AudiusAPI = AudiusAPI()
+        self.InternetArchiveAPI = InternetArchiveAPI()
         self.SpotifyAPICollection = SpotifyAPICollection(self.SQLConn)
         self.URLHandler = URLHandler
 
@@ -55,45 +78,93 @@ class SongCache:
                 self.SQLConn.execute(f"INSERT INTO {DBTables.ALIASES.TABLE_NAME} VALUES (?, ?)", [song.song_id, song.search_name])
 
 
-    def __fetch_new(self, song:SongData, category:UrlTypes, string:str) -> None:
+    def __start_audio(self, song:SongData) -> None:
         """
-        Fetch a new song from YTDLP or Spotipy based on category and name/url string implementing Event based waiting to prevent race conditions
-        Also keeps track of audio url expiry and calls for refresh when needed
-        :param song: the SongData object to fill
-        :param category: category of the string
-        :param string: name/url string
-        :return:
+        Unblock any waiting /api/audio request. Starts downloading only when a
+        usable stream URL exists; the waiter is always released so a failed source
+        degrades to an immediate (empty) stream instead of a deadlock.
         """
-        if song.waiter is None:
-            song.waiter = Event()
-            song.waiter.clear()
-
-        if category == UrlTypes.YT_URL:
-            url = self.URLHandler.merge(category, string)
-            r = self.YTDLP.get_downloader(url)
-            song.song_name = r.get("title")
-            song.yt = string
-            song.duration = r.get("duration")
-            song.audio_url = r.get("url")
+        if song.audio_url and str(song.audio_url).strip() and song.stream is None:
             Thread(target=song.fetch_stream).start()
-            song.thumbnail = None if r.get("thumbnails") is None else r.get("thumbnails")[0].get('url')
+        # #region debug-point D:audio-start
+        _dbg("pre", "D", "SongProcessor.__start_audio", "audio streaming started", song_id=song.song_id)
+        # #endregion
+        if song.waiter is not None:
+            song.waiter.set()
+            song.waiter = None
 
-        elif category == UrlTypes.SPOTIFY_URL:
-            details = self.SpotifyAPICollection.fetch_api().API.track(string)
-            artists = " ".join([_["name"] for _ in details['artists']])
-            song.song_name = details["name"] + " " + artists
-            if song.song_name:
-                self.__fetch_new(song, UrlTypes.UNKNOWN, song.song_name)
+    def __resolve_free_source(self, song:SongData, string:str) -> bool:
+        """
+        Try a free, direct-stream provider (Audius -> Internet Archive) by title.
+        Returns True when a stream URL was found, otherwise False (caller falls back).
+        """
+        try:
+            audius = self.AudiusAPI.match_stream(string)
+            if audius:
+                song.song_name = audius["title"]
+                song.audio_url = audius["stream_url"]
+                song.duration = audius["duration"]
+                song.thumbnail = audius["thumbnail"]
+                song.yt = ""
+                return True
+        except Exception:
+            pass
 
-        elif category == UrlTypes.UNKNOWN:
-            r = self.YTDLP.get_downloader(string + " lyrics")
-            song.yt = r['entries'][0]['id']
-            song.song_name = r["entries"][0]["title"]
-            song.audio_url = r['entries'][0]['url']
-            Thread(target=song.fetch_stream).start()
-            song.duration = r['entries'][0]['duration']
-            song.thumbnail = r['entries'][0]['thumbnail'] if r['entries'][0]['thumbnail'] else None
+        try:
+            archive = self.InternetArchiveAPI.match_stream(string)
+            if archive:
+                song.song_name = archive["title"]
+                song.audio_url = archive["stream_url"]
+                song.duration = archive["duration"]
+                song.thumbnail = archive["thumbnail"]
+                song.yt = ""
+                return True
+        except Exception:
+            pass
 
+        return False
+
+    def __resolve_youtube(self, song:SongData, string:str) -> bool:
+        """
+        Resolve playback through YouTube as a last resort.
+        Uses a fast flat search to grab the top video ID, then deep-extracts just
+        that one video for a usable stream URL. Never raises; returns True on
+        success or False when nothing usable was found so playback degrades instead
+        of hanging on a dead /api/audio request.
+        """
+        try:
+            search_info = self.YTDLP.search_first(string)
+            video_id = search_info.get("id")
+            if not video_id:
+                return False
+            song.yt = video_id
+            if not song.song_name:
+                song.song_name = search_info.get("title") or string
+            if not song.duration:
+                song.duration = search_info.get("duration") or 0
+            if not song.thumbnail:
+                song.thumbnail = search_info.get("thumbnail") or ""
+            r = self.YTDLP.get_downloader(self.URLHandler.merge(UrlTypes.YT_URL, video_id))
+            if isinstance(r, dict):
+                if not song.audio_url:
+                    song.audio_url = r.get("url") or ""
+                song.duration = r.get("duration") or song.duration
+                if not song.thumbnail and isinstance(r.get("thumbnails"), list) and r.get("thumbnails"):
+                    song.thumbnail = r["thumbnails"][0].get("url")
+            return bool(song.audio_url)
+        except Exception:
+            return False
+
+    def __resolve_audio(self, song:SongData, string:str) -> None:
+        """YouTube first (accurate track matching), then the free direct-stream providers."""
+        if not self.__resolve_youtube(song, string):
+            self.__resolve_free_source(song, string)
+
+    def __finish_prep(self, song:SongData) -> None:
+        """
+        Optional post-playback enrichment and persistence. Runs off the playback path
+        so it never delays serving audio. Fills the Spotify ID when missing, then saves.
+        """
         if not song.spotify:
             try:
                 items = self.SpotifyAPICollection.fetch_api().API.search(song.song_name.lower(), type="track")['tracks']['items']
@@ -105,12 +176,57 @@ class SongCache:
                 song.spotify = chosen["id"]
             except:
                 song.spotify = ""
-
+        # #region debug-point D:spotify-done
+        _dbg("pre", "D", "SongProcessor.__finish_prep", "spotify enrichment done", song_id=song.song_id)
+        # #endregion
         song.expiry = datetime.now() + timedelta(hours=5)
         self.__save_to_db(song)
-        if song.waiter is not None:
-            song.waiter.set()
-            song.waiter = None
+
+
+    def __fetch_new(self, song:SongData, category:UrlTypes, string:str) -> None:
+        """
+        Fetch a new song from a free source (Audius -> Internet Archive -> YouTube)
+        based on category and name/url string, implementing Event based waiting to
+        prevent race conditions. Playback is unblocked the instant a stream URL is
+        known; Spotify enrichment and DB persistence run in the background.
+        :param song: the SongData object to fill
+        :param category: category of the string
+        :param string: name/url string
+        :return:
+        """
+        if song.waiter is None:
+            song.waiter = Event()
+            song.waiter.clear()
+
+        try:
+            if category == UrlTypes.YT_URL:
+                url = self.URLHandler.merge(category, string)
+                r = self.YTDLP.get_downloader(url)
+                if isinstance(r, dict):
+                    song.song_name = r.get("title") or song.song_name
+                    song.yt = string
+                    song.duration = r.get("duration") or song.duration
+                    song.audio_url = r.get("url") or ""
+                    song.thumbnail = None if not isinstance(r.get("thumbnails"), list) or not r.get("thumbnails") else r.get("thumbnails")[0].get('url')
+
+            elif category == UrlTypes.SPOTIFY_URL:
+                details = self.SpotifyAPICollection.fetch_api().API.track(string)
+                artists = " ".join([_["name"] for _ in details['artists']])
+                song.song_name = details["name"] + " " + artists
+                song.spotify = string
+                if song.song_name:
+                    self.__resolve_audio(song, song.song_name)
+
+            elif category == UrlTypes.UNKNOWN:
+                self.__resolve_audio(song, string)
+        except Exception:
+            pass
+        finally:
+            # Always release the waiter so /api/audio never deadlocks, even if the
+            # source failed to resolve. Optional enrichment follows in the background.
+            self.__start_audio(song)
+
+        self.__finish_prep(song)
         Thread(target=self.__remove_cache, args=(song,)).start()
 
 
@@ -171,7 +287,12 @@ class SongCache:
             song.expiry = datetime.now()+timedelta(hours=5)
             song.last_fetched_at = datetime.now()
         elif datetime.now() > song.expiry:
-            self.__fetch_new(song, UrlTypes.YT_URL, song.yt)
+            if song.yt:
+                self.__fetch_new(song, UrlTypes.YT_URL, song.yt)
+                return
+            # Stable direct stream (Audius/Internet Archive): keep it, just refresh expiry.
+            song.expiry = datetime.now()+timedelta(hours=5)
+            song.last_fetched_at = datetime.now()
         else: return
         self.SQLConn.execute(f"UPDATE {DBTables.SONGS.TABLE_NAME} SET {DBTables.SONGS.LAST_UPDATED}=NOW(), {DBTables.SONGS.AUDIO_URL}=? WHERE {DBTables.SONGS.SONG_ID}=?", [song.audio_url, song.song_id])
 
@@ -210,7 +331,13 @@ class SongCache:
         if songID not in self.cache: song = self.__cache_from_db(songID, False)
         else: song = self.cache[songID]
         if song is not None and song.waiter is not None:
+            # #region debug-point A:wait-start
+            _tw = _time.time()
+            # #endregion
             song.waiter.wait()
+            # #region debug-point A:wait-end
+            _dbg("pre", "A", "SongProcessor.get_song_data", "waiter released", song_id=songID, wait_ms=round((_time.time() - _tw) * 1000, 1))
+            # #endregion
             if song.repeat_for is not None:
                 song = song.repeat_for
                 if song.waiter is not None:
