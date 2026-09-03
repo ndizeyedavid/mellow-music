@@ -69,18 +69,24 @@ class SongData:
 
     def fetch_stream(self) -> None:
         """
-        Start reading bytes from URL as stream once Song.audio_url is received
-        :return:
+        Start reading bytes from URL as stream once Song.audio_url is received.
+        Never raises: a missing/bad URL just marks the stream done so waiting
+        consumers end cleanly instead of blocking forever.
         """
-        self.stream = requests.get(self.audio_url, stream=True).iter_content(1024) # Chunks of 1KB is read and stored
-        for chunk in self.stream:
+        try:
+            if not self.audio_url or not str(self.audio_url).strip():
+                return
+            self.stream = requests.get(self.audio_url, stream=True, timeout=30).iter_content(64 * 1024) # 64KB chunks are read and stored
+            for chunk in self.stream:
+                with self.data_condition:
+                    self.data_queue.append(chunk)
+                    self.data_condition.notify_all()
+        except Exception:
+            pass
+        finally:
             with self.data_condition:
-                self.data_queue.append(chunk)
+                self.done = True
                 self.data_condition.notify_all()
-
-        with self.data_condition:
-            self.done = True
-            self.data_condition.notify_all()
 
 
     def __get_cached_chunk(self, index:int):

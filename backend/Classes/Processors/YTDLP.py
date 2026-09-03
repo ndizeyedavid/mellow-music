@@ -49,21 +49,21 @@ class YTDLP:
         self.downloaders:list[YoutubeDL] = [
             YoutubeDL({'title': True,
                        'default_search': 'auto',
-                       'format': 'bestaudio',
+                       'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio/best',
                        "silent": 1,
-                       "retries": "infinite",
-                       "extractor_retries": 100,
-                       "file_access_retries": "infinite",
-                       "fragment_retries": "infinite",
+                       "retries": 2,
+                       "extractor_retries": 3,
+                       "file_access_retries": 2,
+                       "fragment_retries": 2,
                        "socket_timeout":30,
                        'js_runtimes': {'node': {}}}),
             YoutubeDL({'title': True,
                        'default_search': 'auto',
                        "silent": 1,
-                       "retries": "infinite",
-                       "extractor_retries": 100,
-                       "file_access_retries": "infinite",
-                       "fragment_retries": "infinite",
+                       "retries": 2,
+                       "extractor_retries": 3,
+                       "file_access_retries": 2,
+                       "fragment_retries": 2,
                        "socket_timeout":30,
                        'js_runtimes': {'node': {}}})
         ]
@@ -88,6 +88,20 @@ class YTDLP:
                 cookies.load_cookies(Files.COOKIE.YT, None, downloader)
             except Exception:
                 pass
+
+
+    def search_first(self, query:str):
+        """Fast flat-search (no format resolution) that returns the top result's metadata."""
+        try:
+            info = self._search_downloader(f"ytsearch1:{query}")
+        except Exception:
+            return {}
+        if not isinstance(info, dict):
+            return {}
+        entries = info.get("entries") or []
+        if entries and isinstance(entries[0], dict):
+            return entries[0]
+        return {}
 
 
     def get_downloader(self, stringValue:str):

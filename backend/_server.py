@@ -35,6 +35,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# #region debug-point setup
+import json as _json, urllib.request as _urllib, time as _time
+_DBG = {"url": "http://127.0.0.1:7777/event", "sid": "slow-first-play"}
+try:
+    with open(".dbg/slow-first-play.env") as _f:
+        for _l in _f.read().splitlines():
+            if _l.startswith("DEBUG_SERVER_URL="): _DBG["url"] = _l.split("=", 1)[1]
+            elif _l.startswith("DEBUG_SESSION_ID="): _DBG["sid"] = _l.split("=", 1)[1]
+except Exception:
+    pass
+def _dbg(run, hyp, loc, msg, **data):
+    try:
+        _p = _json.dumps({"sessionId": _DBG["sid"], "runId": run, "hypothesisId": hyp, "location": loc, "msg": "[DEBUG] " + msg, "data": data, "ts": int(_time.time() * 1000)}).encode()
+        _urllib.urlopen(_urllib.Request(_DBG["url"], data=_p, headers={"Content-Type": "application/json"}), timeout=1).read()
+    except Exception:
+        pass
+# #endregion
+
 Logger = CustomisedLogs()
 SQLConn = DBHolder(Logger)
 URLHandler = URLHandler()
@@ -54,6 +72,25 @@ def _yt_result_to_json(item: dict) -> dict:
     }
 
 
+def _detect_media(data: bytes) -> str:
+    """
+    Detect the audio container from the leading magic bytes so the browser gets a
+    Content-Type that matches the actual bytes (YouTube/WebM-Opus vs Audius-MP3),
+    otherwise Chrome picks the wrong demuxer and refuses to play.
+    """
+    if not data:
+        return "application/octet-stream"
+    if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        return "audio/mpeg"  # MP3
+    if data[:4] == b"\x1aE\xdf\xa3":
+        return "audio/webm"  # WebM / Matroska (Opus/Vorbis)
+    if data[4:8] == b"ftyp":
+        return "audio/mp4"  # M4A
+    if data[:4] == b"fLaC":
+        return "audio/flac"  # FLAC
+    return "application/octet-stream"
+
+
 @app.get("/")
 def root() -> dict:
     return {
@@ -71,7 +108,13 @@ def health() -> dict:
 
 @app.get("/api/prepare/{string:path}")
 def _prepareAPI(string: str) -> dict:
+    # #region debug-point B:prepare-start
+    _t = _time.time()
+    # #endregion
     newID = SongCache.get_song_id(string)
+    # #region debug-point B:prepare-done
+    _dbg("pre", "B", "_server.py:_prepareAPI", "prepare returned", song_id=newID, elapsed_ms=round((_time.time() - _t) * 1000, 1))
+    # #endregion
     return {"ID": newID}
 
 
@@ -85,10 +128,33 @@ def _fetchAPI(songID: str) -> dict:
 
 @app.get("/api/audio/{songID}")
 def _fetchAudio(songID: str):
+    # #region debug-point A:audio-start
+    _t = _time.time()
+    _dbg("pre", "A", "_server.py:_fetchAudio", "audio request arrived", song_id=songID)
+    # #endregion
     song = SongCache.get_song_data(songID)
+    # #region debug-point A:waiter-done
+    _dbg("pre", "A", "_server.py:_fetchAudio", "get_song_data returned", song_id=songID, elapsed_ms=round((_time.time() - _t) * 1000, 1))
+    # #endregion
     if song is None:
         return {"ERROR": "Song not found"}
-    return StreamingResponse(song.fetch_data_from_stream(), media_type="audio/mpeg")
+
+    gen = song.fetch_data_from_stream()
+    # Peek the first chunk so we can serve the correct Content-Type for the actual
+    # audio container (WebM-Opus vs MP3 vs M4A). Then stream everything in order.
+    try:
+        first_chunk = next(gen, None)
+    except Exception:
+        first_chunk = None
+    if first_chunk is None:
+        return StreamingResponse(iter([]), media_type="application/octet-stream")
+
+    def _wrap_stream():
+        yield first_chunk
+        for chunk in gen:
+            yield chunk
+
+    return StreamingResponse(_wrap_stream(), media_type=_detect_media(first_chunk))
 
 
 @app.get("/api/home")
