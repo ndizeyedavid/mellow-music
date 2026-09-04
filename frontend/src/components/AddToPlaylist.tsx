@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import { MdAdd, MdCheck, MdClose } from "react-icons/md";
 import { SafeImage } from "./SafeImage";
 import {
@@ -150,6 +152,28 @@ function AddShell({
       if (added) {
         setDone(true);
         window.setTimeout(() => setDone(false), 1600);
+        toast.success(
+          (t) => (
+            <span className="flex items-center gap-3">
+              <span className="font-medium">
+                Added to {playlist.name}
+              </span>
+              <Link
+                to={`/playlist/${playlist.id}`}
+                onClick={() => toast.dismiss(t.id)}
+                className="shrink-0 rounded-full bg-white px-3 py-1 text-[12px] font-bold text-black transition-transform hover:scale-105"
+              >
+                View
+              </Link>
+            </span>
+          ),
+          { id: `saved-${playlist.id}-${snapshot.trackId}` },
+        );
+      } else {
+        toast(`Already in ${playlist.name}`, {
+          id: `saved-dup-${playlist.id}-${snapshot.trackId}`,
+          icon: "✓",
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add track.");
