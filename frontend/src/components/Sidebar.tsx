@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { Icon, type IconName } from "./Icon";
-import { albums, playlists } from "../data/library";
+import { usePlaylists } from "../context/PlaylistContext";
 
 interface SidebarLinkProps {
   to: string;
@@ -69,8 +69,9 @@ const navLinks = [
 
 const collectionLinks: Array<{ label: string; to: string; icon: IconName }> = [
   { label: "Playlists", to: "/playlists", icon: "playlists" },
+  { label: "Liked Songs", to: "/liked", icon: "like" },
   { label: "Albums", to: "/albums", icon: "albums" },
-  { label: "Tracks", to: "/tracks", icon: "tracks" },
+  { label: "History", to: "/tracks", icon: "tracks" },
   { label: "Artists", to: "/artists", icon: "artists" },
 ];
 
@@ -84,6 +85,7 @@ export function Sidebar() {
 
 /** Sidebar contents shared by the desktop aside and the mobile drawer. */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  const { playlists } = usePlaylists();
   return (
     <>
       <Link
@@ -126,25 +128,20 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </SidebarSection>
 
       <SidebarSection heading="MY PLAYLISTS">
-        {playlists.map((playlist) => (
-          <SidebarLink
-            key={playlist.id}
-            to={`/playlist/${playlist.id}`}
-            label={playlist.name}
-            onClick={onNavigate}
-          />
-        ))}
-      </SidebarSection>
-
-      <SidebarSection heading="Imported Albums">
-        {albums.map((album) => (
-          <SidebarLink
-            key={album.id}
-            to={`/album/${album.id}`}
-            label={album.title}
-            onClick={onNavigate}
-          />
-        ))}
+        {playlists.length === 0 ? (
+          <p className="px-3 py-1 text-[12px]/[16px] text-subtle">
+            Create one from the Playlists page.
+          </p>
+        ) : (
+          playlists.map((playlist) => (
+            <SidebarLink
+              key={playlist.id}
+              to={`/playlist/${playlist.id}`}
+              label={playlist.name}
+              onClick={onNavigate}
+            />
+          ))
+        )}
       </SidebarSection>
     </>
   );

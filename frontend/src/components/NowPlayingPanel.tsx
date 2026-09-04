@@ -1,6 +1,5 @@
-import { MdFavorite, MdFavoriteBorder } from "react-icons/md";
+import { MdFavorite, MdFavoriteBorder, MdQueueMusic } from "react-icons/md";
 import { SafeImage } from "./SafeImage";
-import { artistById } from "../data/library";
 import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { formatTime } from "../utils/format";
@@ -10,22 +9,29 @@ import { Marquee } from "./Marquee";
 export function NowPlayingPanelContent() {
   const { queue, currentTrack, currentIndex, playFrom } = usePlayer();
   const { isSongLiked, toggleLikeSong } = useLibrary();
-  const liked = isSongLiked(currentTrack.id);
 
-  const artist = artistById(currentTrack.artistId) ?? {
-    name: currentTrack.artist,
-    image: currentTrack.image,
-    bio: "Independent artist on Mellow Music.",
-    monthlyListeners: "—",
-    followers: "—",
-  };
+  if (!currentTrack) {
+    return (
+      <div className="flex h-full md:h-[700px] w-[340px] flex-col items-center justify-center gap-3 p-5 text-center">
+        <MdQueueMusic size={32} className="text-subtle" />
+        <p className="text-[14px]/[20px] font-semibold text-fg">
+          Nothing playing yet
+        </p>
+        <p className="text-[13px]/[18px] text-subtle">
+          Played songs and the queue will appear here.
+        </p>
+      </div>
+    );
+  }
+
+  const liked = isSongLiked(currentTrack.id);
 
   const upNext = queue
     .map((track, index) => ({ track, index }))
     .filter(({ index }) => index !== currentIndex);
 
   return (
-    <div className="h-full w-[340px] overflow-y-auto p-5 pb-32">
+    <div className="h-full md:h-[700px] w-[340px] overflow-y-auto p-5 pb-32">
       {/* Now playing */}
       <section>
         <SafeImage
@@ -63,29 +69,20 @@ export function NowPlayingPanelContent() {
         </div>
       </section>
 
-      {/* About the artist */}
+      {/* Track meta */}
       <section className="mt-8">
         <h3 className="text-[10px]/[12px] font-semibold uppercase tracking-wide text-subtle">
-          About the artist
+          Details
         </h3>
-        <SafeImage
-          src={artist.image}
-          alt={artist.name}
-          className="mt-3 h-40 w-full rounded-xl object-cover"
-        />
-        <h4 className="mt-3 text-[18px]/[24px] font-semibold text-fg">
-          {artist.name}
-        </h4>
-        <p className="mt-1 line-clamp-4 text-[14px]/[20px] text-subtle">
-          {artist.bio}
-        </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="rounded-full bg-sidebar px-3 py-1 text-[12px]/[16px] font-medium text-fg">
-            {artist.monthlyListeners} monthly listeners
+            {formatTime(currentTrack.duration)}
           </span>
-          <span className="rounded-full bg-sidebar px-3 py-1 text-[12px]/[16px] font-medium text-fg">
-            {artist.followers} followers
-          </span>
+          {currentTrack.genre && (
+            <span className="rounded-full bg-sidebar px-3 py-1 text-[12px]/[16px] font-medium text-fg">
+              {currentTrack.genre}
+            </span>
+          )}
         </div>
       </section>
 

@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MdChevronRight, MdMenu } from "react-icons/md";
+import { MdMenu } from "react-icons/md";
 import { Icon } from "./Icon";
+import { GoSidebarCollapse } from "react-icons/go";
 
 /** Round navigation/icon button used in the top bar. */
 function RoundButton({
@@ -38,13 +39,23 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Derive the query directly from the URL (single source of truth).
-  const query = new URLSearchParams(location.search).get("q") ?? "";
+  // URL is the source of truth for the submitted query; the input keeps
+  // local state so typing feels instant while navigation stays debounced.
+  const urlQuery = new URLSearchParams(location.search).get("q") ?? "";
+  const [draft, setDraft] = useState(urlQuery);
+  const [lastUrlQuery, setLastUrlQuery] = useState(urlQuery);
+
+  // Sync with back/forward navigation during render (React-endorsed
+  // "adjust state on prop change" pattern — no setState-in-effect).
+  if (lastUrlQuery !== urlQuery) {
+    setLastUrlQuery(urlQuery);
+    setDraft(urlQuery);
+  }
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    navigate(`/search?q=${encodeURIComponent(query)}`);
+    navigate(`/search?q=${encodeURIComponent(draft)}`);
   };
 
   // Debounce live search so results update shortly after the user stops typing.
@@ -52,6 +63,7 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
   useEffect(() => () => window.clearTimeout(debounceRef.current), []);
 
   const updateSearch = (value: string) => {
+    setDraft(value);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/immutability
     debounceRef.current = window.setTimeout(() => {
@@ -86,7 +98,7 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
       >
         <Icon name="search" size={16} />
         <input
-          value={query}
+          value={draft}
           onChange={(event) => updateSearch(event.target.value)}
           placeholder="Search songs, artists, albums…"
           aria-label="Search"
@@ -105,10 +117,10 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
           panelOpen ? "border-accent/60 text-accent" : "border-border text-fg"
         }`}
       >
-        <MdChevronRight
+        <GoSidebarCollapse
           size={20}
           className={`transition-transform duration-300 ${
-            panelOpen ? "rotate-180" : ""
+            panelOpen ? "" : "rotate-180"
           }`}
         />
       </button>

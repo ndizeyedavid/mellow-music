@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
 import { MobileNav } from "./components/MobileNav";
 import { BottomPlayer } from "./components/BottomPlayer";
+import { FullscreenPlayer } from "./components/FullscreenPlayer";
 import {
   NowPlayingPanel,
   NowPlayingPanelContent,
@@ -25,6 +26,7 @@ const lazyPage = (
     })),
   );
 
+const HomePage = lazyPage(() => import("./pages/HomePage"), "HomePage");
 const ExplorePage = lazyPage(
   () => import("./pages/ExplorePage"),
   "ExplorePage",
@@ -50,14 +52,16 @@ const ArtistDetailPage = lazyPage(
   "ArtistDetailPage",
 );
 const SongPage = lazyPage(() => import("./pages/SongPage"), "SongPage");
+const LikedPage = lazyPage(() => import("./pages/LikedPage"), "LikedPage");
 const NotFoundPage = lazyPage(
   () => import("./pages/NotFoundPage"),
   "NotFoundPage",
 );
 
 function AppShell() {
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [navOpen, setNavOpen] = useState(false);
+  const [fullOpen, setFullOpen] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
@@ -100,7 +104,7 @@ function AppShell() {
         >
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/" element={<ExplorePage />} />
+              <Route path="/" element={<HomePage />} />
               <Route path="/explore" element={<ExplorePage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/playlists" element={<PlaylistsPage />} />
@@ -111,6 +115,7 @@ function AppShell() {
               <Route path="/artists" element={<ArtistsPage />} />
               <Route path="/artist/:id" element={<ArtistDetailPage />} />
               <Route path="/song/:id" element={<SongPage />} />
+              <Route path="/liked" element={<LikedPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
@@ -135,7 +140,10 @@ function AppShell() {
         </div>
       )}
 
-      <BottomPlayer />
+      <BottomPlayer onExpand={() => setFullOpen(true)} />
+
+      {/* Fullscreen Now Playing overlay */}
+      {fullOpen && <FullscreenPlayer onClose={() => setFullOpen(false)} />}
     </div>
   );
 }
