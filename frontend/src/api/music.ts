@@ -209,6 +209,48 @@ export async function getPlaylist(
   return { playlist: data.playlist, tracks: data.tracks ?? [] };
 }
 
+/** One mix track: discovery shape plus the curator's one-line reason. */
+export interface MixTrack extends ApiDiscoveryItem {
+  reason: string;
+}
+
+/** Payload of GET /api/mix. */
+export interface MixResponse {
+  mix_id: string;
+  name: string;
+  blurb: string;
+  tracks: MixTrack[];
+  curated: boolean;
+}
+
+/**
+ * GET /api/mix — taste-driven mix. Artists/exclude come from buildTaste().
+ * Empty taste returns chart fallback (cold start, no LLM spend).
+ * fresh=true forces full re-curation past the backend cache.
+ */
+export async function getMix(
+  artists: string[],
+  exclude: string[],
+  limit = 12,
+  fresh = false,
+): Promise<MixResponse> {
+  const { data } = await api.get<MixResponse>("/api/mix", {
+    params: {
+      artists: artists.join(","),
+      exclude: exclude.join(","),
+      limit,
+      ...(fresh ? { fresh: true } : {}),
+    },
+  });
+  return {
+    mix_id: data.mix_id ?? "",
+    name: data.name ?? "My Mix",
+    blurb: data.blurb ?? "",
+    tracks: data.tracks ?? [],
+    curated: data.curated ?? false,
+  };
+}
+
 /**
  * GET /api/prepare/{string} — prepare a song by title (or URL) and get its ID.
  * The title usually comes from a home/search result.

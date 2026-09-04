@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SectionSlider } from "../components/SectionSlider";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { usePlayDiscovery } from "../hooks/usePlayDiscovery";
+import { useHistory } from "../utils/history";
+import { usePlaylists } from "../context/PlaylistContext";
+import { buildTaste, tasteSignature } from "../utils/taste";
 import {
   ApiAlbumCard,
   ApiArtistCard,
@@ -12,8 +15,11 @@ import {
 import {
   getCharts,
   getGenres,
+  getMix,
   type ApiCharts,
+  type ApiDiscoveryItem,
   type ApiGenre,
+  type MixTrack,
 } from "../api/music";
 
 function SkeletonRow({ count = 6 }: { count?: number }) {
@@ -132,6 +138,12 @@ export function HomePage() {
           </div>
         )}
 
+        <TasteRow
+          onPlay={(items, i) => void playItems(items, i)}
+          isResolving={isResolving}
+          resolvingActive={resolvingKey !== null}
+        />
+
         {charts.tracks.length > 0 && (
           <SectionSlider title="Top Tracks">
             {charts.tracks.map((item, index) => (
@@ -181,5 +193,91 @@ export function HomePage() {
         )}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Taste row: mix for the listener's own artists (hidden on cold start) */
+/* ------------------------------------------------------------------ */
+
+function TasteRow({
+  onPlay,
+  isResolving,
+  resolvingActive,
+}: {
+  onPlay: (items: ApiDiscoveryItem[], index: number) => void;
+  isResolving: (item: ApiDiscoveryItem, index: number) => boolean;
+  resolvingActive: boolean;
+}) {
+  const history = useHistory();
+  const { playlists } = usePlaylists();
+  const taste = useMemo(
+    () => buildTaste(history, playlists),
+    [history, playlists],
+  );
+  // Cold start (no listening data): charts carry the page, no LLM spend.
+  if (taste.artists.length === 0) return null;
+  return (
+    <TasteMix
+      key={tasteSignature(taste)}
+      taste={taste}
+      onPlay={onPlay}
+      isResolving={isResolving}
+      resolvingActive={resolvingActive}
+    />
+  );
+}
+
+function TasteMix({
+  taste,
+  onPlay,
+  isResolving,
+  resolvingActive,
+}: {
+  taste: { artists: string[]; exclude: string[] };
+  onPlay: (items: ApiDiscoveryItem[], index: number) => void;
+  isResolving: (item: ApiDiscoveryItem, index: number) => boolean;
+  resolvingActive: boolean;
+}) {
+  const [tracks, setTracks] = useState<MixTrack[]>([]);
+  const [title, setTitle] = useState("");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMix(taste.artists, taste.exclude, 10)
+      .then((mix) => {
+        if (cancelled) return;
+        setTracks(mix.tracks);
+        setTitle(mix.name);
+        setReady(true);
+      })
+      .catch(() => {
+        // Taste row is optional — charts carry the page on failure.
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taste]);
+
+  if (!ready || tracks.length === 0) {
+    return null;
+  }
+  return (
+    <SectionSlider title={title || "For your taste"}>
+      {tracks.map((item, index) => (
+        <ApiTrackCard
+          key={`${item.id}-${index}`}
+          item={item}
+          index={index}
+          items={tracks}
+          onPlay={onPlay}
+          resolving={isResolving(item, index)}
+          disabled={resolvingActive}
+          note={item.reason || undefined}
+        />
+      ))}
+    </SectionSlider>
   );
 }

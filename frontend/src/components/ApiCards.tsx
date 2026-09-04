@@ -82,6 +82,7 @@ export function ApiTrackCard({
   onPlay,
   resolving,
   disabled,
+  note,
 }: {
   item: ApiDiscoveryItem;
   index: number;
@@ -89,6 +90,8 @@ export function ApiTrackCard({
   onPlay: (items: ApiDiscoveryItem[], index: number) => void;
   resolving?: boolean;
   disabled?: boolean;
+  /** Optional third line (e.g. a curator's reason). */
+  note?: string;
 }) {
   const title = item.title?.trim() || "Unknown title";
   const artist = item.artist?.trim() || "Unknown artist";
@@ -122,6 +125,11 @@ export function ApiTrackCard({
           ? ` • ${formatTime(item.duration)}`
           : ""}
       </p>
+      {note && (
+        <p className="mt-0.5 line-clamp-2 text-[11px]/[14px] text-accent/80">
+          {note}
+        </p>
+      )}
     </article>
   );
 }
