@@ -161,11 +161,14 @@ def _playlistAPI(playlist_id: str) -> dict:
 
 
 @app.get("/api/search")
-def _searchAPI(q: str = Query(..., description="Search query string"), max_results: int = Query(10, ge=1, le=20)) -> dict:
+def _searchAPI(q: str = Query(..., description="Search query string"), max_results: int = Query(10, ge=1, le=20), provider: str = Query("auto", description="Search engine: auto, deezer, itunes or youtube")) -> dict:
     query = (q or "").strip()
     if not query:
-        return {"results": []}
-    return {"results": [_yt_result_to_json(item) for item in SongCache.YTDLP.search(query, max_results=max_results)]}
+        return {"results": [], "provider": "auto"}
+    engine = (provider or "auto").strip().lower()
+    if engine not in ("auto", "deezer", "itunes", "youtube"):
+        engine = "auto"
+    return {"results": [_yt_result_to_json(item) for item in SongCache.YTDLP.search(query, max_results=max_results, provider=engine)], "provider": engine}
 
 
 if __name__ == "__main__":

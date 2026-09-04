@@ -202,11 +202,7 @@ class YTDLP:
             "url": url,
         }
 
-    def _search_free(self, query:str, max_results:int=10) -> list[dict]:
-        query = (query or "").strip()
-        if not query:
-            return []
-
+    def _search_deezer(self, query:str, max_results:int=10) -> list[dict]:
         deezer_url = f"https://api.deezer.com/search/track?q={requests.utils.quote(query)}&limit={max_results}"
         deezer_data = self._request_json(deezer_url, timeout=12)
         if deezer_data and isinstance(deezer_data, dict):
@@ -217,7 +213,9 @@ class YTDLP:
                     results.append(normalized)
             if results:
                 return results
+        return []
 
+    def _search_itunes(self, query:str, max_results:int=10) -> list[dict]:
         itunes_url = f"https://itunes.apple.com/search?term={requests.utils.quote(query)}&media=music&entity=song&limit={max_results}"
         itunes_data = self._request_json(itunes_url, timeout=12)
         if itunes_data and isinstance(itunes_data, dict):
@@ -228,8 +226,18 @@ class YTDLP:
                     results.append(normalized)
             if results:
                 return results
-
         return []
+
+    def _search_free(self, query:str, max_results:int=10) -> list[dict]:
+        query = (query or "").strip()
+        if not query:
+            return []
+
+        deezer_results = self._search_deezer(query, max_results=max_results)
+        if deezer_results:
+            return deezer_results
+
+        return self._search_itunes(query, max_results=max_results)
 
     def _homepage_free(self, max_results:int=12) -> list[dict]:
         deezer_url = f"https://api.deezer.com/chart/0/tracks?limit={max_results}"
@@ -287,16 +295,21 @@ class YTDLP:
             })
         return results
 
-    def search(self, query:str, max_results:int=8, cache_ttl_seconds:int=180) -> list[dict]:
+    def search(self, query:str, max_results:int=8, cache_ttl_seconds:int=180, provider:str="auto") -> list[dict]:
         """
-        Search YouTube and return a lightweight list of result metadata for homepage/search cards.
+        Search and return a lightweight list of result metadata for homepage/search cards.
+        provider: "auto" (deezer -> itunes -> youtube fallback chain),
+        or "deezer" | "itunes" | "youtube" to force a single engine.
         Uses a fast flat-extract mode and keeps the last good value available while a background refresh runs.
         """
         query = (query or "").strip()
         if not query:
             return []
+        provider = (provider or "auto").strip().lower()
+        if provider not in ("auto", "deezer", "itunes", "youtube"):
+            provider = "auto"
 
-        cache_key = f"ytsearch::{query.lower()}::{max_results}"
+        cache_key = f"ytsearch::{provider}::{query.lower()}::{max_results}"
         now = datetime.now()
         cached = self._cache_get(cache_key)
         if cached:
@@ -310,20 +323,28 @@ class YTDLP:
                     stale_results = cached
             if stale_results:
                 def _refresh_search():
-                    refreshed = self._build_search_results(query, max_results=max_results)
+                    refreshed = self._search_for_provider(query, provider, max_results=max_results)
                     if refreshed:
                         self._cache_set(cache_key, refreshed, cache_ttl_seconds)
                 Thread(target=_refresh_search, daemon=True).start()
                 return stale_results
 
-        free_results = self._search_free(query, max_results=max_results)
-        if free_results:
-            self._cache_set(cache_key, free_results, cache_ttl_seconds)
-            return free_results
-
-        results = self._build_search_results(query, max_results=max_results)
+        results = self._search_for_provider(query, provider, max_results=max_results)
         self._cache_set(cache_key, results, cache_ttl_seconds)
         return results
+
+    def _search_for_provider(self, query:str, provider:str, max_results:int=8) -> list[dict]:
+        """Run one search pass for a single provider (no fallback chain)."""
+        if provider == "deezer":
+            return self._search_deezer(query, max_results=max_results)
+        if provider == "itunes":
+            return self._search_itunes(query, max_results=max_results)
+        if provider == "youtube":
+            return self._build_search_results(query, max_results=max_results)
+        free_results = self._search_free(query, max_results=max_results)
+        if free_results:
+            return free_results
+        return self._build_search_results(query, max_results=max_results)
 
     def _build_homepage_results(self, max_results_per_query:int=3, max_total:int=12) -> list[dict]:
         results = []
