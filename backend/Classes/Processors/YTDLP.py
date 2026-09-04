@@ -47,23 +47,27 @@ class YTDLP:
             "top viral songs",
         ]
         self.downloaders:list[YoutubeDL] = [
+            # Android client first: not subject to the web-client PO token /
+            # visitor-data bot checks that currently fail with 500s.
             YoutubeDL({'title': True,
                        'default_search': 'auto',
                        'format': 'bestaudio',
                        "silent": 1,
-                       "retries": "infinite",
-                       "extractor_retries": 100,
-                       "file_access_retries": "infinite",
-                       "fragment_retries": "infinite",
+                       "retries": 3,
+                       "extractor_retries": 3,
+                       "file_access_retries": 3,
+                       "fragment_retries": 3,
                        "socket_timeout":30,
+                       'extractor_args': {'youtube': {'player_client': ['android']}},
                        'js_runtimes': {'node': {}}}),
             YoutubeDL({'title': True,
                        'default_search': 'auto',
+                       'format': 'bestaudio',
                        "silent": 1,
-                       "retries": "infinite",
-                       "extractor_retries": 100,
-                       "file_access_retries": "infinite",
-                       "fragment_retries": "infinite",
+                       "retries": 3,
+                       "extractor_retries": 3,
+                       "file_access_retries": 3,
+                       "fragment_retries": 3,
                        "socket_timeout":30,
                        'js_runtimes': {'node': {}}})
         ]
@@ -122,7 +126,7 @@ class YTDLP:
         with self._search_lock:
             return self._search_cache.get(key, (None, None))[1] if key in self._search_cache else None
 
-    def _cache_set(self, key:str, value:list[dict], ttl_seconds:int):
+    def _cache_set(self, key:str, value, ttl_seconds:int):
         if self.redis_client is not None:
             try:
                 import json
@@ -132,6 +136,23 @@ class YTDLP:
                 pass
         with self._search_lock:
             self._search_cache[key] = (datetime.now(), value)
+
+    def _memo_get(self, key:str, ttl_seconds:int):
+        """TTL-aware cache read (works for any JSON value, not just lists)."""
+        if self.redis_client is not None:
+            try:
+                import json
+                value = self.redis_client.get(key)
+                if value is not None:
+                    return json.loads(value)
+            except Exception:
+                pass
+        with self._search_lock:
+            if key in self._search_cache:
+                cached_time, cached_value = self._search_cache[key]
+                if datetime.now() - cached_time < timedelta(seconds=ttl_seconds):
+                    return cached_value
+        return None
 
     def _request_json(self, url:str, timeout:int=12):
         try:
@@ -373,3 +394,264 @@ class YTDLP:
         if not self._homepage_refreshing:
             self.warmup_homepage(max_results_per_query=max_results_per_query, max_total=max_total, cache_ttl_seconds=cache_ttl_seconds)
         return self._homepage_fallback[:max_total]
+
+    # ------------------------------------------------------------------
+    # Free-provider collections: albums, artists, playlists, genres
+    # (Deezer-first; shapes are normalized for the public API.)
+    # ------------------------------------------------------------------
+
+    DEEZER_API = "https://api.deezer.com"
+
+    @staticmethod
+    def _artist_name(value) -> str:
+        if isinstance(value, dict):
+            return value.get("name") or "Unknown Artist"
+        return value or "Unknown Artist"
+
+    def _normalize_album(self, item:dict) -> dict | None:
+        if not item or not item.get("id"):
+            return None
+        artist = item.get("artist") or {}
+        return {
+            "id": str(item.get("id")),
+            "title": item.get("title") or "Unknown Album",
+            "artist": self._artist_name(artist),
+            "artist_id": str(artist.get("id")) if isinstance(artist, dict) and artist.get("id") else "",
+            "cover": item.get("cover_medium") or item.get("cover_big") or item.get("cover") or "",
+            "nb_tracks": item.get("nb_tracks") or 0,
+        }
+
+    def _normalize_artist(self, item:dict) -> dict | None:
+        if not item or not item.get("id"):
+            return None
+        return {
+            "id": str(item.get("id")),
+            "name": item.get("name") or "Unknown Artist",
+            "picture": item.get("picture_medium") or item.get("picture_big") or item.get("picture") or "",
+            "fans": item.get("nb_fan") or 0,
+        }
+
+    def _normalize_playlist(self, item:dict, creator_key:str="user") -> dict | None:
+        if not item or not item.get("id"):
+            return None
+        creator = item.get("creator") or item.get(creator_key) or {}
+        return {
+            "id": str(item.get("id")),
+            "title": item.get("title") or "Untitled Playlist",
+            "picture": item.get("picture_medium") or item.get("picture_big") or item.get("picture") or "",
+            "creator": creator.get("name") if isinstance(creator, dict) else "",
+            "nb_tracks": item.get("nb_tracks") or 0,
+        }
+
+    def _normalize_genre(self, item:dict) -> dict | None:
+        if not item or not item.get("id"):
+            return None
+        return {
+            "id": str(item.get("id")),
+            "name": item.get("name") or "Unknown",
+            "picture": item.get("picture_medium") or item.get("picture_big") or item.get("picture") or "",
+        }
+
+    def _normalize_detail_track(self, item:dict, fallback_cover:str="") -> dict | None:
+        """Track inside album/artist/playlist payloads, in discovery shape."""
+        if not item or not item.get("id"):
+            return None
+        album = item.get("album") or {}
+        cover = ""
+        if isinstance(album, dict):
+            cover = album.get("cover_medium") or album.get("cover_big") or ""
+        return {
+            "id": str(item.get("id")),
+            "title": item.get("title") or item.get("title_short") or "Unknown Title",
+            "artist": self._artist_name(item.get("artist")),
+            "thumbnail": cover or fallback_cover,
+            "duration": item.get("duration") or 0,
+            "url": item.get("link") or "",
+        }
+
+    def charts(self, limit:int=10, cache_ttl_seconds:int=600) -> dict:
+        """Deezer charts: top tracks, albums, artists and playlists in one call."""
+        cache_key = f"dz:charts:{limit}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        result = {"tracks": [], "albums": [], "artists": [], "playlists": []}
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/chart/0?limit={limit}", timeout=12)
+            if data and isinstance(data, dict):
+                tracks = [self._normalize_free_result(t, "deezer") for t in (data.get("tracks", {}) or {}).get("data", []) or []]
+                result["tracks"] = [t for t in tracks if t][:limit]
+                albums = [self._normalize_album(a) for a in (data.get("albums", {}) or {}).get("data", []) or []]
+                result["albums"] = [a for a in albums if a][:limit]
+                artists = [self._normalize_artist(a) for a in (data.get("artists", {}) or {}).get("data", []) or []]
+                result["artists"] = [a for a in artists if a][:limit]
+                playlists = [self._normalize_playlist(p) for p in (data.get("playlists", {}) or {}).get("data", []) or []]
+                result["playlists"] = [p for p in playlists if p][:limit]
+        except Exception:
+            pass
+        if any(result.values()):
+            self._cache_set(cache_key, result, cache_ttl_seconds)
+        return result
+
+    def genres(self, cache_ttl_seconds:int=86400) -> list[dict]:
+        """Deezer genre list (skips the id=0 'All' pseudo-genre with no art)."""
+        cache_key = "dz:genres"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        results = []
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/genre", timeout=12)
+            if data and isinstance(data, dict):
+                for item in data.get("data") or []:
+                    if str(item.get("id")) == "0":
+                        continue
+                    normalized = self._normalize_genre(item)
+                    if normalized:
+                        results.append(normalized)
+        except Exception:
+            pass
+        if results:
+            self._cache_set(cache_key, results, cache_ttl_seconds)
+        return results
+
+    def search_collection(self, kind:str, query:str, max_results:int=10, cache_ttl_seconds:int=300) -> list[dict]:
+        """Search Deezer albums, artists or playlists. kind in {album, artist, playlist}."""
+        kind = (kind or "").strip().lower()
+        query = (query or "").strip()
+        if kind not in ("album", "artist", "playlist") or not query:
+            return []
+        cache_key = f"dz:search:{kind}:{query.lower()}:{max_results}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        results = []
+        try:
+            import requests
+            url = f"{self.DEEZER_API}/search/{kind}?q={requests.utils.quote(query)}&limit={max_results}"
+            data = self._request_json(url, timeout=12)
+            if data and isinstance(data, dict):
+                for item in (data.get("data") or [])[:max_results]:
+                    if kind == "album":
+                        normalized = self._normalize_album(item)
+                    elif kind == "artist":
+                        normalized = self._normalize_artist(item)
+                    else:
+                        normalized = self._normalize_playlist(item)
+                    if normalized:
+                        results.append(normalized)
+        except Exception:
+            pass
+        if results:
+            self._cache_set(cache_key, results, cache_ttl_seconds)
+        return results
+
+    def album_details(self, album_id:str, cache_ttl_seconds:int=3600) -> dict | None:
+        """Album header + full tracklist. Track playback still goes via prepare/fetch."""
+        album_id = (album_id or "").strip()
+        if not album_id:
+            return None
+        cache_key = f"dz:album:{album_id}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/album/{album_id}", timeout=12)
+            if not data or not isinstance(data, dict) or data.get("error"):
+                return None
+            cover = data.get("cover_big") or data.get("cover_medium") or ""
+            artist = data.get("artist") or {}
+            album = {
+                "id": str(data.get("id")),
+                "title": data.get("title") or "Unknown Album",
+                "artist": self._artist_name(artist),
+                "artist_id": str(artist.get("id")) if isinstance(artist, dict) and artist.get("id") else "",
+                "cover": cover,
+                "nb_tracks": data.get("nb_tracks") or 0,
+                "release_date": data.get("release_date") or "",
+                "label": data.get("label") or "",
+            }
+            tracks = []
+            for item in ((data.get("tracks") or {}).get("data") or []):
+                normalized = self._normalize_detail_track(item, fallback_cover=cover)
+                if normalized:
+                    tracks.append(normalized)
+            result = {"album": album, "tracks": tracks}
+            self._cache_set(cache_key, result, cache_ttl_seconds)
+            return result
+        except Exception:
+            return None
+
+    def artist_details(self, artist_id:str, top_limit:int=10, album_limit:int=8, cache_ttl_seconds:int=3600) -> dict | None:
+        """Artist header + top tracks + albums."""
+        artist_id = (artist_id or "").strip()
+        if not artist_id:
+            return None
+        cache_key = f"dz:artist:{artist_id}:{top_limit}:{album_limit}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/artist/{artist_id}", timeout=12)
+            if not data or not isinstance(data, dict) or data.get("error"):
+                return None
+            artist = {
+                "id": str(data.get("id")),
+                "name": data.get("name") or "Unknown Artist",
+                "picture": data.get("picture_big") or data.get("picture_medium") or "",
+                "fans": data.get("nb_fan") or 0,
+                "nb_albums": data.get("nb_album") or 0,
+            }
+            top_tracks = []
+            top_data = self._request_json(f"{self.DEEZER_API}/artist/{artist_id}/top?limit={top_limit}", timeout=12)
+            if top_data and isinstance(top_data, dict):
+                for item in (top_data.get("data") or [])[:top_limit]:
+                    normalized = self._normalize_detail_track(item)
+                    if normalized:
+                        top_tracks.append(normalized)
+            albums = []
+            album_data = self._request_json(f"{self.DEEZER_API}/artist/{artist_id}/albums?limit={album_limit}", timeout=12)
+            if album_data and isinstance(album_data, dict):
+                for item in (album_data.get("data") or [])[:album_limit]:
+                    normalized = self._normalize_album(item)
+                    if normalized:
+                        albums.append(normalized)
+            result = {"artist": artist, "top_tracks": top_tracks, "albums": albums}
+            self._cache_set(cache_key, result, cache_ttl_seconds)
+            return result
+        except Exception:
+            return None
+
+    def playlist_details(self, playlist_id:str, cache_ttl_seconds:int=1800) -> dict | None:
+        """Curated playlist header + tracklist."""
+        playlist_id = (playlist_id or "").strip()
+        if not playlist_id:
+            return None
+        cache_key = f"dz:playlist:{playlist_id}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/playlist/{playlist_id}", timeout=12)
+            if not data or not isinstance(data, dict) or data.get("error"):
+                return None
+            creator = data.get("creator") or {}
+            playlist = {
+                "id": str(data.get("id")),
+                "title": data.get("title") or "Untitled Playlist",
+                "picture": data.get("picture_big") or data.get("picture_medium") or "",
+                "creator": creator.get("name") if isinstance(creator, dict) else "",
+                "description": (data.get("description") or "").strip(),
+                "nb_tracks": data.get("nb_tracks") or 0,
+                "fans": data.get("fans") or 0,
+            }
+            tracks = []
+            for item in ((data.get("tracks") or {}).get("data") or []):
+                normalized = self._normalize_detail_track(item)
+                if normalized:
+                    tracks.append(normalized)
+            result = {"playlist": playlist, "tracks": tracks}
+            self._cache_set(cache_key, result, cache_ttl_seconds)
+            return result
+        except Exception:
+            return None
