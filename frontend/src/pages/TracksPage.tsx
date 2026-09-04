@@ -4,14 +4,14 @@ import { MdDeleteOutline, MdPlayArrow } from "react-icons/md";
 import { EmptyState } from "../components/EmptyState";
 import { SafeImage } from "../components/SafeImage";
 import { AddTrackButton } from "../components/AddToPlaylist";
+import { QueueMenuButton } from "../components/QueueMenu";
 import { usePlayer } from "../context/PlayerContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import { resolveDiscoveryItem } from "../api/music";
 import {
   clearHistory,
-  historyEntryToDiscovery,
   historyEntryToTrack,
   isEntryFresh,
+  resolveHistoryEntry,
   useHistory,
   type HistoryEntry,
 } from "../utils/history";
@@ -68,10 +68,7 @@ export function TracksPage() {
     }
     setResolvingId(entry.trackId);
     try {
-      const track = await resolveDiscoveryItem(
-        historyEntryToDiscovery(entry),
-      );
-      replaceQueue([track], 0);
+      replaceQueue([await resolveHistoryEntry(entry)], 0);
     } catch (err) {
       setPlayError(
         err instanceof Error ? err.message : "Could not play this track.",
@@ -196,7 +193,7 @@ export function TracksPage() {
             return (
               <li
                 key={`${entry.trackId}-${entry.playedAt}`}
-                className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors md:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_5.5rem] ${
+                className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_7rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors md:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem] ${
                   isCurrent ? "bg-white/5" : "hover:bg-white/5"
                 }`}
               >
@@ -253,6 +250,16 @@ export function TracksPage() {
                 <span className="flex items-center justify-end gap-0 text-right text-[13px] tabular-nums text-subtle">
                   {formatTime(entry.duration)}
                   <AddTrackButton track={historyEntryToTrack(entry)} />
+                  <QueueMenuButton
+                    label={entry.title}
+                    preview={{
+                      title: entry.title,
+                      artist: entry.artist,
+                      thumbnail: entry.thumbnail,
+                      duration: entry.duration,
+                    }}
+                    getTrack={() => resolveHistoryEntry(entry)}
+                  />
                 </span>
               </li>
             );

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
+  MdDragHandle,
   MdFavorite,
   MdFavoriteBorder,
   MdMoreHoriz,
@@ -20,6 +21,7 @@ import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { AddTrackButton } from "./AddToPlaylist";
 import { Vinyl } from "./Vinyl";
+import { useDragReorder } from "../hooks/useDragReorder";
 import { formatTime } from "../utils/format";
 
 /* ---- Small UI helpers ---- */
@@ -200,6 +202,7 @@ export function BottomPlayer({
     toggleMute,
     cycleRepeat,
     toggleShuffle,
+    moveInQueue,
     clearStreamError,
   } = usePlayer();
 
@@ -222,6 +225,8 @@ export function BottomPlayer({
     setOptionsOpen(false);
     setShortcutsOpen(false);
   };
+
+  const queueDrag = useDragReorder(moveInQueue);
 
   const effectiveVolume = muted ? 0 : volume;
 
@@ -264,31 +269,61 @@ export function BottomPlayer({
         />
       )}
 
-      {/* Queue panel */}
+      {/* Queue panel (drag rows to reorder) */}
       {queueOpen && (
         <div className="absolute bottom-full right-0 z-50 mb-3 mr-4 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-elevated p-2 shadow-xl-dark">
           <p className="px-3 py-2 text-[10px]/[12px] font-semibold uppercase tracking-wide text-subtle">
-            Up next
+            Up next — drag to reorder
           </p>
           {queue.map((track, i) => {
             const isCurrent = i === currentIndex;
+            const drag = queueDrag.rowProps(i);
+            const isDropTarget =
+              queueDrag.dropAt === i && queueDrag.dragFrom !== i;
+            const pending = !track.source;
             return (
               <button
                 key={`${track.title}-${i}`}
                 type="button"
                 onClick={() => {
+                  if (queueDrag.consumeMoved()) return;
                   playFrom(i);
                   setQueueOpen(false);
                 }}
-                className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-white/5 ${
+                draggable={drag.draggable}
+                onDragStart={drag.onDragStart}
+                onDragOver={drag.onDragOver}
+                onDragLeave={drag.onDragLeave}
+                onDrop={drag.onDrop}
+                onDragEnd={drag.onDragEnd}
+                className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/5 ${
                   isCurrent ? "bg-white/5" : ""
-                }`}
+                } ${isDropTarget ? "outline outline-2 outline-accent" : ""} ${
+                  queueDrag.dragFrom === i ? "opacity-40" : ""
+                } ${pending ? "opacity-70" : ""}`}
               >
-                <img
-                  src={track.image}
-                  alt=""
-                  className="h-10 w-10 shrink-0 rounded-sm object-cover"
-                />
+                <span
+                  className="cursor-grab text-subtle active:cursor-grabbing"
+                  aria-hidden="true"
+                >
+                  <MdDragHandle size={16} />
+                </span>
+                <span className="relative shrink-0">
+                  <img
+                    src={track.image}
+                    alt=""
+                    className="h-10 w-10 rounded-sm object-cover"
+                  />
+                  {pending && (
+                    <span
+                      className="absolute inset-0 flex items-center justify-center rounded-sm bg-black/60"
+                      role="status"
+                      aria-label={`Resolving ${track.title}`}
+                    >
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                    </span>
+                  )}
+                </span>
                 <span className="min-w-0 flex-1">
                   <span
                     className={`block truncate text-[14px]/[20px] font-semibold ${

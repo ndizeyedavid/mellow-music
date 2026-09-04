@@ -1,5 +1,6 @@
-import { MdFavorite, MdFavoriteBorder, MdQueueMusic } from "react-icons/md";
+import { MdDragHandle, MdFavorite, MdFavoriteBorder, MdQueueMusic } from "react-icons/md";
 import { SafeImage } from "./SafeImage";
+import { useDragReorder } from "../hooks/useDragReorder";
 import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { formatTime } from "../utils/format";
@@ -7,8 +8,9 @@ import { Marquee } from "./Marquee";
 
 /** Inner scrollable content shared by the desktop panel and mobile overlay. */
 export function NowPlayingPanelContent({ onArtwork }: { onArtwork: () => void }) {
-  const { queue, currentTrack, currentIndex, playFrom } = usePlayer();
+  const { queue, currentTrack, currentIndex, playFrom, moveInQueue } = usePlayer();
   const { isSongLiked, toggleLikeSong } = useLibrary();
+  const panelDrag = useDragReorder(moveInQueue);
 
   if (!currentTrack) {
     return (
@@ -94,24 +96,58 @@ export function NowPlayingPanelContent({ onArtwork }: { onArtwork: () => void })
         </div>
       </section>
 
-      {/* Next in queue */}
+      {/* Next in queue (drag rows to reorder) */}
       <section className="mt-8">
         <h3 className="text-[10px]/[12px] font-semibold uppercase tracking-wide text-subtle">
-          Next in queue
+          Next in queue — drag to reorder
         </h3>
         <ul className="mt-2">
-          {upNext.map(({ track, index }) => (
-            <li key={`${track.title}-${index}`}>
-              <button
-                type="button"
-                onClick={() => playFrom(index)}
-                className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/5"
-              >
-                <SafeImage
-                  src={track.image}
-                  alt=""
-                  className="h-11 w-11 shrink-0 rounded-md object-cover"
-                />
+          {upNext.map(({ track, index }) => {
+            const drag = panelDrag.rowProps(index);
+            const dimmed = panelDrag.dragFrom === index;
+            const targeted =
+              panelDrag.dropAt === index && panelDrag.dragFrom !== index;
+            const pending = !track.source;
+            return (
+              <li key={`${track.title}-${index}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (panelDrag.consumeMoved()) return;
+                    playFrom(index);
+                  }}
+                  draggable={drag.draggable}
+                  onDragStart={drag.onDragStart}
+                  onDragOver={drag.onDragOver}
+                  onDragLeave={drag.onDragLeave}
+                  onDrop={drag.onDrop}
+                  onDragEnd={drag.onDragEnd}
+                  className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/5 ${
+                    targeted ? "outline outline-2 outline-accent" : ""
+                  } ${dimmed ? "opacity-40" : ""} ${pending ? "opacity-70" : ""}`}
+                >
+                  <span
+                    className="shrink-0 cursor-grab text-subtle active:cursor-grabbing"
+                    aria-hidden="true"
+                  >
+                    <MdDragHandle size={16} />
+                  </span>
+                  <span className="relative shrink-0">
+                    <SafeImage
+                      src={track.image}
+                      alt=""
+                      className="h-11 w-11 rounded-md object-cover"
+                    />
+                    {pending && (
+                      <span
+                        className="absolute inset-0 flex items-center justify-center rounded-md bg-black/60"
+                        role="status"
+                        aria-label={`Resolving ${track.title}`}
+                      >
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                      </span>
+                    )}
+                  </span>
                 <span className="min-w-0 flex-1">
                   <Marquee className="text-[14px]/[20px] font-semibold text-fg">
                     {track.title}
@@ -123,9 +159,10 @@ export function NowPlayingPanelContent({ onArtwork }: { onArtwork: () => void })
                 <span className="shrink-0 text-[12px]/[16px] font-medium text-subtle">
                   {formatTime(track.duration ?? 0)}
                 </span>
-              </button>
-            </li>
-          ))}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </section>
     </div>

@@ -2,6 +2,8 @@ import { MdPause, MdPlayArrow } from "react-icons/md";
 import { Link } from "react-router-dom";
 import { SafeImage } from "./SafeImage";
 import { AddDiscoveryButton } from "./AddToPlaylist";
+import { QueueMenuButton } from "./QueueMenu";
+import { resolveDiscoveryItem } from "../api/music";
 import type { ApiDiscoveryItem } from "../api/music";
 import { formatTime } from "../utils/format";
 
@@ -35,7 +37,7 @@ export function ApiTrackList({
         return (
           <li
             key={`${item.id}-${index}`}
-            className="group grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
+            className="group grid grid-cols-[2.5rem_minmax(0,1fr)_7rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-white/5"
           >
             <span className="flex w-10 justify-center">
               {resolving ? (
@@ -85,13 +87,24 @@ export function ApiTrackList({
               )}
             </div>
 
-            <span className="flex items-center justify-end gap-1 text-right text-[13px] tabular-nums text-subtle">
+            <span className="flex items-center justify-end gap-0 text-right text-[13px] tabular-nums text-subtle">
               {typeof item.duration === "number" && item.duration > 0
                 ? formatTime(item.duration)
                 : "--:--"}
               {enableAdd && (
                 <span className="hidden group-hover:inline-flex">
                   <AddDiscoveryButton items={items} index={index} />
+                  <QueueMenuButton
+                    label={title}
+                    preview={{
+                      title,
+                      artist,
+                      thumbnail: item.thumbnail ?? "",
+                      duration:
+                        typeof item.duration === "number" ? item.duration : 0,
+                    }}
+                    getTrack={() => resolveDiscoveryItem(items[index])}
+                  />
                 </span>
               )}
             </span>

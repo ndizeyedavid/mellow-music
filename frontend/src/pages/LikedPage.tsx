@@ -4,6 +4,7 @@ import { MdFavorite, MdPlayArrow } from "react-icons/md";
 import { EmptyState } from "../components/EmptyState";
 import { SafeImage } from "../components/SafeImage";
 import { AddTrackButton } from "../components/AddToPlaylist";
+import { QueueMenuButton } from "../components/QueueMenu";
 import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -111,7 +112,7 @@ export function LikedPage() {
                 return (
                   <li
                     key={song.id}
-                    className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
+                    className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_8.5rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
                       isCurrent ? "bg-white/5" : "hover:bg-white/5"
                     }`}
                   >
@@ -161,6 +162,16 @@ export function LikedPage() {
                         <MdFavorite size={16} />
                       </button>
                       <AddTrackButton track={song} />
+                      <QueueMenuButton
+                        label={song.title}
+                        preview={{
+                          title: song.title,
+                          artist: song.artist,
+                          thumbnail: song.image,
+                          duration: song.duration,
+                        }}
+                        getTrack={async () => song}
+                      />
                     </span>
                   </li>
                 );

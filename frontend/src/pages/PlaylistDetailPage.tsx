@@ -14,6 +14,8 @@ import { EmptyState } from "../components/EmptyState";
 import { PlaylistForm } from "../components/PlaylistForm";
 import { usePlayer } from "../context/PlayerContext";
 import { playlistCover } from "../utils/playlists";
+import { QueueMenuButton } from "../components/QueueMenu";
+import { resolveSavedTrack } from "../utils/playlists";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { usePlayDiscovery, type ResolvableItem } from "../hooks/usePlayDiscovery";
@@ -294,7 +296,7 @@ function UserPlaylistDetail({ id }: { id: string }) {
             return (
               <li
                 key={`${song.trackId}-${index}`}
-                className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_4rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
+                className={`group grid grid-cols-[2.5rem_minmax(0,1fr)_8rem] items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
                   isCurrent ? "bg-white/5" : "hover:bg-white/5"
                 }`}
               >
@@ -352,6 +354,16 @@ function UserPlaylistDetail({ id }: { id: string }) {
                   <span className="mr-1 text-[13px] tabular-nums text-subtle">
                     {formatTime(song.duration)}
                   </span>
+                  <QueueMenuButton
+                    label={song.title}
+                    preview={{
+                      title: song.title,
+                      artist: song.artist,
+                      thumbnail: song.thumbnail,
+                      duration: song.duration,
+                    }}
+                    getTrack={() => resolveSavedTrack(song)}
+                  />
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
                       type="button"

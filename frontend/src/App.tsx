@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Toaster } from "react-hot-toast";
 import NProgress from "nprogress";
 import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
@@ -163,6 +164,19 @@ function AppShell() {
           }}
         />
       )}
+
+      {/* Queue + resolve confirmations, top-center */}
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          style: {
+            background: "#232326",
+            color: "#fcfcfc",
+            border: "1px solid rgba(255,255,255,0.08)",
+          },
+          success: { iconTheme: { primary: "#1ed760", secondary: "#171719" } },
+        }}
+      />
     </div>
   );
 }

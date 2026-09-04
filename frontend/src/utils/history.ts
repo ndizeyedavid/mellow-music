@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from "react";
-import type { ApiDiscoveryItem } from "../api/music";
+import {
+  resolveDiscoveryItem,
+  type ApiDiscoveryItem,
+} from "../api/music";
 import type { Track } from "../types";
 
 /**
@@ -125,6 +128,12 @@ export function historyEntryToDiscovery(entry: HistoryEntry): ApiDiscoveryItem {
     duration: entry.duration,
     url: "",
   };
+}
+
+/** Resolve an entry: fresh snapshots play instantly, else re-resolve. */
+export async function resolveHistoryEntry(entry: HistoryEntry): Promise<Track> {
+  if (isEntryFresh(entry)) return historyEntryToTrack(entry);
+  return resolveDiscoveryItem(historyEntryToDiscovery(entry));
 }
 
 /** Build a directly-playable Track from a fresh (unexpired) entry. */
