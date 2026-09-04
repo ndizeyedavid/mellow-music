@@ -14,6 +14,7 @@ from customisedLogs import CustomisedLogs
 from Classes.Processors.DBHolder import DBHolder
 from Classes.Processors.URLHandler import URLHandler
 from Classes.Processors.SongProcessor import SongCache
+from Classes.Processors.MixCurator import MixCurator
 from Hidden.Secrets import CoreValues
 
 
@@ -29,6 +30,7 @@ Logger = CustomisedLogs()
 SQLConn = DBHolder(Logger)
 URLHandler = URLHandler()
 SongCache = SongCache(SQLConn.useDB(), Logger, URLHandler)
+Curator = MixCurator(Logger)
 
 
 # Direct axios access from the frontend dev server (no Vite proxy).
@@ -158,6 +160,59 @@ def _playlistAPI(playlist_id: str) -> dict:
     if details is None:
         return {"ERROR": "Playlist not found"}
     return details
+
+
+@app.get("/api/mix")
+def _mixAPI(
+    artists: str = Query("", description="Comma-separated artist names from user taste"),
+    genres: str = Query("", description="Comma-separated genre names from user taste"),
+    exclude: str = Query("", description="Comma-separated titles the user already knows"),
+    limit: int = Query(12, ge=1, le=20),
+    fresh: bool = Query(False, description="Bypass caches for a full re-curation"),
+) -> dict:
+    """
+    Taste-driven mix. Deterministic candidate pool for now; the Groq
+    curator upgrade adds ordering, reasons, naming (curated=True).
+    Empty taste falls back to charts (cold start, no LLM spend).
+    """
+    import hashlib
+    names = [a.strip() for a in artists.split(",") if a.strip()][:5]
+    genre_list = [g.strip() for g in genres.split(",") if g.strip()][:3]
+    excluded = [e.strip() for e in exclude.split(",") if e.strip()]
+    if not names and not genre_list:
+        charts = SongCache.YTDLP.charts(limit=limit)
+        tracks = charts.get("tracks", [])[:limit]
+        return {
+            "mix_id": "charts",
+            "name": "Fresh Mix",
+            "blurb": "Trending tracks to get you started.",
+            "tracks": [{**t, "reason": ""} for t in tracks],
+            "curated": False,
+        }
+    tracks = SongCache.YTDLP.mix_candidates(
+        artist_names=names, genres=genre_list, exclude_titles=excluded, limit=limit,
+        fresh=fresh,
+    )
+    sig = hashlib.md5(f"{'|'.join(names)}::{'|'.join(genre_list)}::{limit}".encode()).hexdigest()
+    # Full curator upgrade when a key is configured; otherwise deterministic.
+    if Curator.available() and tracks:
+        curated = Curator.curate_cached(sig, names, tracks, limit=limit, fresh=fresh)
+        if curated:
+            return {
+                "mix_id": sig,
+                "name": curated["name"],
+                "blurb": curated["blurb"],
+                "tracks": curated["tracks"],
+                "curated": True,
+            }
+    seed = names[0] if names else genre_list[0]
+    return {
+        "mix_id": sig,
+        "name": f"Mix inspired by {seed}",
+        "blurb": "Picked from artists and genres you listen to.",
+        "tracks": [{**t, "reason": ""} for t in tracks],
+        "curated": False,
+    }
 
 
 @app.get("/api/search")
