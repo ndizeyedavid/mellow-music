@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MdMenu } from "react-icons/md";
 import { Icon } from "./Icon";
+import { SearchProviderPicker } from "./SearchProviderPicker";
+import {
+  providerMeta,
+  useSearchProvider,
+} from "../utils/searchProvider";
 import { GoSidebarCollapse } from "react-icons/go";
 
 /** Round navigation/icon button used in the top bar. */
@@ -45,12 +50,21 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
   const [draft, setDraft] = useState(urlQuery);
   const [lastUrlQuery, setLastUrlQuery] = useState(urlQuery);
 
-  // Sync with back/forward navigation during render (React-endorsed
-  // "adjust state on prop change" pattern — no setState-in-effect).
+  // Keep the input in sync with back/forward navigation (render-adjust).
   if (lastUrlQuery !== urlQuery) {
     setLastUrlQuery(urlQuery);
     setDraft(urlQuery);
   }
+
+  // Search engine: stored choice, Deezer until the user picks. First focus
+  // with no stored choice opens the chooser automatically.
+  const storedProvider = useSearchProvider();
+  const engine = providerMeta(storedProvider ?? "deezer");
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const handleFocus = () => {
+    if (storedProvider === null) setPickerOpen(true);
+  };
 
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
@@ -94,16 +108,45 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
 
       <form
         onSubmit={submitSearch}
-        className="mx-auto flex h-10 w-[389px] max-w-full items-center gap-2.5 rounded-xl border border-border bg-elevated px-2.5 focus-within:border-accent/50"
+        className="relative mx-auto flex h-10 w-[389px] max-w-full items-center gap-2.5 rounded-xl border border-border bg-elevated px-2.5 focus-within:border-accent/50"
       >
         <Icon name="search" size={16} />
         <input
           value={draft}
           onChange={(event) => updateSearch(event.target.value)}
+          onFocus={handleFocus}
           placeholder="Search songs, artists, albums…"
           aria-label="Search"
           className="w-full bg-transparent text-[14px]/[20px] text-fg outline-none placeholder:text-subtle"
         />
+        <button
+          type="button"
+          onClick={() => setPickerOpen((open) => !open)}
+          aria-label={`Search engine: ${engine.name}. Change search engine`}
+          aria-haspopup="menu"
+          aria-expanded={pickerOpen}
+          title={`Search engine: ${engine.name}`}
+          className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors hover:bg-white/10"
+        >
+          <img
+            src={engine.logo}
+            alt=""
+            className="h-5 w-5 object-contain invert"
+          />
+        </button>
+
+        {pickerOpen && (
+          <>
+            <div
+              aria-hidden="true"
+              onClick={() => setPickerOpen(false)}
+              className="fixed inset-0 z-40 cursor-default"
+            />
+            <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-border bg-elevated p-1.5 shadow-xl-dark">
+              <SearchProviderPicker onClose={() => setPickerOpen(false)} />
+            </div>
+          </>
+        )}
       </form>
 
       <button

@@ -5,6 +5,7 @@ import { EmptyState } from "../components/EmptyState";
 import { SafeImage } from "../components/SafeImage";
 import { SectionSlider } from "../components/SectionSlider";
 import { ApiTrackList } from "../components/ApiTrackList";
+import { QueueMenuButton } from "../components/QueueMenu";
 import {
   ApiAlbumCard,
   ApiArtistCard,
@@ -17,6 +18,7 @@ import { usePlayDiscovery } from "../hooks/usePlayDiscovery";
 import {
   getCharts,
   getGenres,
+  resolveDiscoveryItem,
   searchAlbums,
   searchApi,
   searchArtists,
@@ -27,6 +29,7 @@ import {
   type ApiGenre,
   type ApiPlaylist,
 } from "../api/music";
+import { providerMeta, useSearchProvider } from "../utils/searchProvider";
 import { formatTime } from "../utils/format";
 
 type Tab = "all" | "songs" | "albums" | "artists" | "playlists";
@@ -43,18 +46,39 @@ const tabs: Array<{ id: Tab; label: string }> = [
 export function SearchPage() {
   const [searchParams] = useSearchParams();
   const query = (searchParams.get("q") ?? "").trim();
+  const provider = useSearchProvider() ?? "deezer";
   useDocumentTitle(query ? `Search: ${query}` : "Search");
 
-  // Empty query -> live browse. Keyed results reset tab + fetch per query
-  // (no setState-in-effect).
+  // Empty query -> live browse. Keyed results reset tab + fetch per
+  // query and engine (no setState-in-effect).
   if (!query) {
     return <BrowseAll />;
   }
-  return <SearchResults key={query} query={query} />;
+  return (
+    <SearchResults
+      key={`${query}::${provider}`}
+      query={query}
+      provider={provider}
+    />
+  );
 }
 
-function SearchResults({ query }: { query: string }) {
+function SearchResults({
+  query,
+  provider,
+}: {
+  query: string;
+  provider: string;
+}) {
   const [tab, setTab] = useState<Tab>("all");
+  // Album/artist/playlist search is Deezer-powered; other engines get songs.
+  const deezerOnly = provider !== "deezer";
+  const visibleTabs = deezerOnly
+    ? tabs.filter((t) => t.id === "all" || t.id === "songs")
+    : tabs;
+  const meta = providerMeta(
+    provider === "itunes" || provider === "youtube" ? provider : "deezer",
+  );
 
   const { currentTrack, isPlaying } = usePlayer();
   const { playItems, isResolving, resolvingKey, playError, clearPlayError } =
@@ -67,28 +91,31 @@ function SearchResults({ query }: { query: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Debounced multi-type search: all four endpoints in parallel.
+  // Debounced multi-type search: song engine + (Deezer-only) collections.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      Promise.all([
-        searchApi(query, 10),
-        searchAlbums(query, 8),
-        searchArtists(query, 8),
-        searchPlaylists(query, 8),
-      ])
-        .then(([songRes, albumRes, artistRes, playlistRes]) => {
-          setSongs(songRes);
-          setAlbums(albumRes);
-          setArtists(artistRes);
-          setPlaylists(playlistRes);
-        })
+      const songSearch = searchApi(query, 10, provider).then((songRes) => {
+        setSongs(songRes);
+      });
+      const collectionSearch = deezerOnly
+        ? Promise.resolve()
+        : Promise.all([
+            searchAlbums(query, 8),
+            searchArtists(query, 8),
+            searchPlaylists(query, 8),
+          ]).then(([albumRes, artistRes, playlistRes]) => {
+            setAlbums(albumRes);
+            setArtists(artistRes);
+            setPlaylists(playlistRes);
+          });
+      Promise.all([songSearch, collectionSearch])
         .catch((err: unknown) => {
           setError(err instanceof Error ? err.message : "Search failed.");
         })
         .finally(() => setLoading(false));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [query, provider, deezerOnly]);
 
   const show = (id: Tab) => tab === "all" || tab === id;
   const hasAny =
@@ -102,10 +129,20 @@ function SearchResults({ query }: { query: string }) {
       <h1 className="text-2xl/[32px] font-bold text-fg">
         Results for “{query}”
       </h1>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-elevated px-3 py-1 text-[12px]/[16px] font-medium text-subtle">
+          <img
+            src={meta.logo}
+            alt=""
+            className="h-4 w-4 object-contain invert"
+          />
+          via {meta.name}
+        </span>
+      </div>
 
       {/* Filter tabs */}
       <div className="mt-4 flex flex-wrap gap-2" role="tablist">
-        {tabs.map((item) => (
+        {visibleTabs.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -315,6 +352,19 @@ function AllResults({
               </p>
               <span className="mt-2 inline-block rounded-full bg-white/10 px-3 py-1 text-[11px]/[14px] font-semibold uppercase tracking-wide text-fg">
                 Song
+              </span>
+              <span className="ml-2 inline-flex translate-y-1">
+                <QueueMenuButton
+                  label={topTitle}
+                  preview={{
+                    title: topTitle,
+                    artist: topArtist,
+                    thumbnail: top?.thumbnail ?? "",
+                    duration:
+                      typeof top?.duration === "number" ? top.duration : 0,
+                  }}
+                  getTrack={() => resolveDiscoveryItem(songs[0])}
+                />
               </span>
               <button
                 type="button"

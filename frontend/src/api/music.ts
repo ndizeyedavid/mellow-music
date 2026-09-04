@@ -80,15 +80,16 @@ export interface ApiCharts {
 /* Raw endpoint calls                                                  */
 /* ------------------------------------------------------------------ */
 
-/** GET /api/search?q=... — generic search. */
+/** GET /api/search?q=... — generic search on the chosen engine. */
 export async function searchApi(
   query: string,
   maxResults = 10,
+  provider: string = "deezer",
 ): Promise<ApiDiscoveryItem[]> {
   const q = query.trim();
   if (!q) return [];
   const { data } = await api.get<{ results: ApiDiscoveryItem[] }>("/api/search", {
-    params: { q, max_results: maxResults },
+    params: { q, max_results: maxResults, provider },
   });
   return data.results ?? [];
 }
