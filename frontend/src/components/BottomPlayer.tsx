@@ -19,7 +19,7 @@ import type { Track } from "../types";
 import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { AddTrackButton } from "./AddToPlaylist";
-import { SafeImage } from "./SafeImage";
+import { Vinyl } from "./Vinyl";
 import { formatTime } from "../utils/format";
 
 /* ---- Small UI helpers ---- */
@@ -168,7 +168,13 @@ function OptionsMenu({ track }: { track: Track }) {
   );
 }
 
-export function BottomPlayer({ onExpand }: { onExpand: () => void }) {
+export function BottomPlayer({
+  onExpand,
+  onArtwork,
+}: {
+  onExpand: () => void;
+  onArtwork: () => void;
+}) {
   const {
     audioRef,
     audioRefB,
@@ -344,11 +350,20 @@ export function BottomPlayer({ onExpand }: { onExpand: () => void }) {
 
       {/* Left: now playing */}
       <div className="flex min-w-0 shrink-0 items-center gap-4">
-        <SafeImage
-          src={currentTrack.image}
-          alt=""
-          className="h-[65px] w-16 shrink-0 rounded-sm object-cover"
-        />
+        <button
+          type="button"
+          onClick={onArtwork}
+          aria-label={`Open artwork for ${currentTrack.title}`}
+          title="Open artwork"
+          className="cursor-pointer rounded-full transition-transform hover:scale-105 active:scale-95"
+        >
+          <Vinyl
+            src={currentTrack.image}
+            title={currentTrack.title}
+            spinning={isPlaying}
+            className="h-16 w-16"
+          />
+        </button>
         <div className="hidden min-w-0 flex-col gap-1.5 sm:flex">
           <div className="flex items-center gap-2">
             <Link

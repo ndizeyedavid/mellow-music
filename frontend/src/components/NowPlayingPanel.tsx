@@ -6,7 +6,7 @@ import { formatTime } from "../utils/format";
 import { Marquee } from "./Marquee";
 
 /** Inner scrollable content shared by the desktop panel and mobile overlay. */
-export function NowPlayingPanelContent() {
+export function NowPlayingPanelContent({ onArtwork }: { onArtwork: () => void }) {
   const { queue, currentTrack, currentIndex, playFrom } = usePlayer();
   const { isSongLiked, toggleLikeSong } = useLibrary();
 
@@ -34,11 +34,19 @@ export function NowPlayingPanelContent() {
     <div className="h-full md:h-[700px] w-[340px] overflow-y-auto p-5 pb-32">
       {/* Now playing */}
       <section>
-        <SafeImage
-          src={currentTrack.image}
-          alt={`${currentTrack.title} cover`}
-          className="aspect-square w-full rounded-xl object-cover shadow-xl-dark"
-        />
+        <button
+          type="button"
+          onClick={onArtwork}
+          aria-label={`Open artwork for ${currentTrack.title}`}
+          title="Open artwork"
+          className="block w-full cursor-pointer rounded-xl transition-transform hover:scale-[1.01] active:scale-[0.99]"
+        >
+          <SafeImage
+            src={currentTrack.image}
+            alt={`${currentTrack.title} cover`}
+            className="aspect-square w-full rounded-xl object-cover shadow-xl-dark"
+          />
+        </button>
         <div className="mt-4">
           <Marquee className="text-[22px]/[28px] font-bold text-fg">
             {currentTrack.title}
@@ -126,10 +134,11 @@ export function NowPlayingPanelContent() {
 
 interface NowPlayingPanelProps {
   open: boolean;
+  onArtwork: () => void;
 }
 
 /** Desktop inline collapsible panel (slides in width). */
-export function NowPlayingPanel({ open }: NowPlayingPanelProps) {
+export function NowPlayingPanel({ open, onArtwork }: NowPlayingPanelProps) {
   return (
     <aside
       aria-hidden={!open}
@@ -137,7 +146,7 @@ export function NowPlayingPanel({ open }: NowPlayingPanelProps) {
         open ? "w-[340px]" : "w-0 border-l-0"
       }`}
     >
-      {open && <NowPlayingPanelContent />}
+      {open && <NowPlayingPanelContent onArtwork={onArtwork} />}
     </aside>
   );
 }

@@ -6,6 +6,7 @@ import { TopNav } from "./components/TopNav";
 import { MobileNav } from "./components/MobileNav";
 import { BottomPlayer } from "./components/BottomPlayer";
 import { FullscreenPlayer } from "./components/FullscreenPlayer";
+import { ArtworkPopup } from "./components/ArtworkPopup";
 import {
   NowPlayingPanel,
   NowPlayingPanelContent,
@@ -59,9 +60,10 @@ const NotFoundPage = lazyPage(
 );
 
 function AppShell() {
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [fullOpen, setFullOpen] = useState(false);
+  const [artOpen, setArtOpen] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
@@ -124,7 +126,10 @@ function AppShell() {
 
       {/* Desktop inline panel */}
       <div className="hidden shrink-0 md:block">
-        <NowPlayingPanel open={panelOpen} />
+        <NowPlayingPanel
+          open={panelOpen}
+          onArtwork={() => setArtOpen(true)}
+        />
       </div>
 
       {/* Mobile panel overlay */}
@@ -135,15 +140,29 @@ function AppShell() {
             onClick={() => setPanelOpen(false)}
           />
           <div className="absolute inset-y-0 right-0 animate-slide-in-left bg-elevated shadow-2xl">
-            <NowPlayingPanelContent />
+            <NowPlayingPanelContent onArtwork={() => setArtOpen(true)} />
           </div>
         </div>
       )}
 
-      <BottomPlayer onExpand={() => setFullOpen(true)} />
+      <BottomPlayer
+        onExpand={() => setFullOpen(true)}
+        onArtwork={() => setArtOpen(true)}
+      />
 
       {/* Fullscreen Now Playing overlay */}
       {fullOpen && <FullscreenPlayer onClose={() => setFullOpen(false)} />}
+
+      {/* Artwork popup with fullscreen handoff */}
+      {artOpen && (
+        <ArtworkPopup
+          onClose={() => setArtOpen(false)}
+          onFullscreen={() => {
+            setArtOpen(false);
+            setFullOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 }
