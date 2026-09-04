@@ -163,7 +163,7 @@ function SongDetail({ title }: { title: string }) {
               type="button"
               aria-label={liked ? "Remove from liked" : "Add to liked"}
               aria-pressed={liked}
-              onClick={() => toggleLikeSong(track.id)}
+              onClick={() => toggleLikeSong(track.id, track.title)}
               className={`cursor-pointer transition-transform hover:scale-110 ${
                 liked ? "text-accent" : "text-fg hover:text-accent"
               }`}

@@ -156,7 +156,7 @@ export function LikedPage() {
                         type="button"
                         aria-label={`Unlike ${song.title}`}
                         aria-pressed="true"
-                        onClick={() => toggleLikeSong(song.id)}
+                        onClick={() => toggleLikeSong(song.id, song.title)}
                         className="cursor-pointer rounded-full p-2 text-accent transition-all hover:scale-110 active:scale-90"
                       >
                         <MdFavorite size={16} />
