@@ -1,10 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Toaster } from "react-hot-toast";
 import NProgress from "nprogress";
 import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
 import { MobileNav } from "./components/MobileNav";
 import { BottomPlayer } from "./components/BottomPlayer";
+import { FullscreenPlayer } from "./components/FullscreenPlayer";
+import { ArtworkPopup } from "./components/ArtworkPopup";
 import {
   NowPlayingPanel,
   NowPlayingPanelContent,
@@ -25,6 +28,7 @@ const lazyPage = (
     })),
   );
 
+const HomePage = lazyPage(() => import("./pages/HomePage"), "HomePage");
 const ExplorePage = lazyPage(
   () => import("./pages/ExplorePage"),
   "ExplorePage",
@@ -50,6 +54,7 @@ const ArtistDetailPage = lazyPage(
   "ArtistDetailPage",
 );
 const SongPage = lazyPage(() => import("./pages/SongPage"), "SongPage");
+const LikedPage = lazyPage(() => import("./pages/LikedPage"), "LikedPage");
 const NotFoundPage = lazyPage(
   () => import("./pages/NotFoundPage"),
   "NotFoundPage",
@@ -58,6 +63,8 @@ const NotFoundPage = lazyPage(
 function AppShell() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [fullOpen, setFullOpen] = useState(false);
+  const [artOpen, setArtOpen] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
@@ -100,7 +107,7 @@ function AppShell() {
         >
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/" element={<ExplorePage />} />
+              <Route path="/" element={<HomePage />} />
               <Route path="/explore" element={<ExplorePage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/playlists" element={<PlaylistsPage />} />
@@ -111,6 +118,7 @@ function AppShell() {
               <Route path="/artists" element={<ArtistsPage />} />
               <Route path="/artist/:id" element={<ArtistDetailPage />} />
               <Route path="/song/:id" element={<SongPage />} />
+              <Route path="/liked" element={<LikedPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
@@ -119,7 +127,10 @@ function AppShell() {
 
       {/* Desktop inline panel */}
       <div className="hidden shrink-0 md:block">
-        <NowPlayingPanel open={panelOpen} />
+        <NowPlayingPanel
+          open={panelOpen}
+          onArtwork={() => setArtOpen(true)}
+        />
       </div>
 
       {/* Mobile panel overlay */}
@@ -130,12 +141,42 @@ function AppShell() {
             onClick={() => setPanelOpen(false)}
           />
           <div className="absolute inset-y-0 right-0 animate-slide-in-left bg-elevated shadow-2xl">
-            <NowPlayingPanelContent />
+            <NowPlayingPanelContent onArtwork={() => setArtOpen(true)} />
           </div>
         </div>
       )}
 
-      <BottomPlayer />
+      <BottomPlayer
+        onExpand={() => setFullOpen(true)}
+        onArtwork={() => setArtOpen(true)}
+      />
+
+      {/* Fullscreen Now Playing overlay */}
+      {fullOpen && <FullscreenPlayer onClose={() => setFullOpen(false)} />}
+
+      {/* Artwork popup with fullscreen handoff */}
+      {artOpen && (
+        <ArtworkPopup
+          onClose={() => setArtOpen(false)}
+          onFullscreen={() => {
+            setArtOpen(false);
+            setFullOpen(true);
+          }}
+        />
+      )}
+
+      {/* Queue + resolve confirmations, top-center */}
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          style: {
+            background: "#232326",
+            color: "#fcfcfc",
+            border: "1px solid rgba(255,255,255,0.08)",
+          },
+          success: { iconTheme: { primary: "#1ed760", secondary: "#171719" } },
+        }}
+      />
     </div>
   );
 }

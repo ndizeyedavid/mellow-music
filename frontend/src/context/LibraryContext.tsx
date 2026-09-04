@@ -4,6 +4,8 @@ import {
   useContext,
   type ReactNode,
 } from "react";
+import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 import { usePersistentState } from "../utils/usePersistentState";
 
 interface LibraryContextValue {
@@ -13,7 +15,7 @@ interface LibraryContextValue {
   isSongLiked: (id: string) => boolean;
   isArtistFollowed: (id: string) => boolean;
   isAlbumSaved: (id: string) => boolean;
-  toggleLikeSong: (id: string) => void;
+  toggleLikeSong: (id: string, title?: string) => void;
   toggleFollowArtist: (id: string) => void;
   toggleSaveAlbum: (id: string) => void;
 }
@@ -42,8 +44,33 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   );
 
   const toggleLikeSong = useCallback(
-    (id: string) => setLikedSongs((prev) => toggleInList(prev, id)),
-    [setLikedSongs],
+    (id: string, title?: string) => {
+      const adding = !likedSongs.includes(id);
+      setLikedSongs((prev) => toggleInList(prev, id));
+      // Confirm with a top-center toast (View jumps to Liked Songs).
+      if (title) {
+        if (adding) {
+          toast.success(
+            (t) => (
+              <span className="flex items-center gap-3">
+                <span className="font-medium">Added to Liked Songs</span>
+                <Link
+                  to="/liked"
+                  onClick={() => toast.dismiss(t.id)}
+                  className="shrink-0 rounded-full bg-white px-3 py-1 text-[12px] font-bold text-black transition-transform hover:scale-105"
+                >
+                  View
+                </Link>
+              </span>
+            ),
+            { id: `liked-${id}` },
+          );
+        } else {
+          toast("Removed from Liked Songs", { id: `unliked-${id}` });
+        }
+      }
+    },
+    [setLikedSongs, likedSongs],
   );
   const toggleFollowArtist = useCallback(
     (id: string) => setFollowedArtists((prev) => toggleInList(prev, id)),

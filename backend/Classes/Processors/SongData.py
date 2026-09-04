@@ -24,6 +24,9 @@ class SongData:
         self.last_fetched_at:datetime = datetime.now()
         self.repeat_for: SongData | None = None
         self.waiter = None
+        # Set when extraction fails (e.g. YouTube bot-check) so API
+        # endpoints can return {"ERROR": ...} instead of hanging or 500ing.
+        self.error: str | None = None
 
         self.stream = None
         self.data_queue = []

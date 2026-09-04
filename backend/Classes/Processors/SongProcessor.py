@@ -55,10 +55,34 @@ class SongCache:
                 self.SQLConn.execute(f"INSERT INTO {DBTables.ALIASES.TABLE_NAME} VALUES (?, ?)", [song.song_id, song.search_name])
 
 
+    def __fail_fetch(self, song:SongData, reason:str) -> None:
+        """
+        Mark a song fetch as failed without raising, so waiters are released
+        and API endpoints can return {"ERROR": reason} instead of 500ing.
+        :param song: the SongData object that failed
+        :param reason: human-readable failure cause
+        :return:
+        """
+        try:
+            self.logger.error(f"Song fetch failed for '{song.search_name}': {reason}")
+        except Exception:
+            pass
+        song.error = reason
+        if song.waiter is not None:
+            try:
+                song.waiter.set()
+            except Exception:
+                pass
+            song.waiter = None
+        Thread(target=self.__remove_cache, args=(song,)).start()
+
+
     def __fetch_new(self, song:SongData, category:UrlTypes, string:str) -> None:
         """
         Fetch a new song from YTDLP or Spotipy based on category and name/url string implementing Event based waiting to prevent race conditions
         Also keeps track of audio url expiry and calls for refresh when needed
+        Extraction failures (e.g. YouTube bot checks) are recorded on
+        song.error instead of raising, so /api/fetch returns {"ERROR": ...}.
         :param song: the SongData object to fill
         :param category: category of the string
         :param string: name/url string
@@ -68,31 +92,56 @@ class SongCache:
             song.waiter = Event()
             song.waiter.clear()
 
-        if category == UrlTypes.YT_URL:
-            url = self.URLHandler.merge(category, string)
-            r = self.YTDLP.get_downloader(url)
-            song.song_name = r.get("title")
-            song.yt = string
-            song.duration = r.get("duration")
-            song.audio_url = r.get("url")
-            Thread(target=song.fetch_stream).start()
-            song.thumbnail = None if r.get("thumbnails") is None else r.get("thumbnails")[0].get('url')
+        try:
+            if category == UrlTypes.YT_URL:
+                url = self.URLHandler.merge(category, string)
+                r = self.YTDLP.get_downloader(url)
+                if not r:
+                    self.__fail_fetch(song, "YouTube refused this video (bot check). Try again later.")
+                    return
+                song.song_name = r.get("title")
+                song.yt = string
+                song.duration = r.get("duration")
+                song.audio_url = r.get("url")
+                if not song.audio_url:
+                    self.__fail_fetch(song, "No playable audio found for this video.")
+                    return
+                Thread(target=song.fetch_stream).start()
+                thumbnails = r.get("thumbnails") or []
+                song.thumbnail = thumbnails[0].get('url') if thumbnails else None
 
-        elif category == UrlTypes.SPOTIFY_URL:
-            details = self.SpotifyAPICollection.fetch_api().API.track(string)
-            artists = " ".join([_["name"] for _ in details['artists']])
-            song.song_name = details["name"] + " " + artists
-            if song.song_name:
-                self.__fetch_new(song, UrlTypes.UNKNOWN, song.song_name)
+            elif category == UrlTypes.SPOTIFY_URL:
+                details = self.SpotifyAPICollection.fetch_api().API.track(string)
+                artists = " ".join([_["name"] for _ in details['artists']])
+                song.song_name = details["name"] + " " + artists
+                if song.song_name:
+                    self.__fetch_new(song, UrlTypes.UNKNOWN, song.song_name)
+                    return
 
-        elif category == UrlTypes.UNKNOWN:
-            r = self.YTDLP.get_downloader(string + " lyrics")
-            song.yt = r['entries'][0]['id']
-            song.song_name = r["entries"][0]["title"]
-            song.audio_url = r['entries'][0]['url']
-            Thread(target=song.fetch_stream).start()
-            song.duration = r['entries'][0]['duration']
-            song.thumbnail = r['entries'][0]['thumbnail'] if r['entries'][0]['thumbnail'] else None
+            elif category == UrlTypes.UNKNOWN:
+                r = self.YTDLP.get_downloader(string + " lyrics")
+                entries = (r.get("entries") or []) if r else []
+                entries = [e for e in entries if e]
+                if not entries:
+                    self.__fail_fetch(song, f"No results for '{string}'.")
+                    return
+                first = entries[0]
+                song.yt = first.get('id')
+                song.song_name = first.get("title")
+                song.audio_url = first.get('url')
+                if not song.audio_url:
+                    self.__fail_fetch(song, f"No playable audio for '{string}'.")
+                    return
+                Thread(target=song.fetch_stream).start()
+                song.duration = first.get('duration')
+                song.thumbnail = first.get('thumbnail') or None
+
+            else:
+                self.__fail_fetch(song, "Unsupported link type.")
+                return
+        except Exception as exc:
+            self.__fail_fetch(song, f"Extraction failed: {exc}")
+            return
 
         if not song.spotify:
             try:
@@ -107,7 +156,11 @@ class SongCache:
                 song.spotify = ""
 
         song.expiry = datetime.now() + timedelta(hours=5)
-        self.__save_to_db(song)
+        try:
+            self.__save_to_db(song)
+        except Exception as exc:
+            self.__fail_fetch(song, f"Could not save song: {exc}")
+            return
         if song.waiter is not None:
             song.waiter.set()
             song.waiter = None
@@ -210,12 +263,18 @@ class SongCache:
         if songID not in self.cache: song = self.__cache_from_db(songID, False)
         else: song = self.cache[songID]
         if song is not None and song.waiter is not None:
-            song.waiter.wait()
+            # Bounded wait: extraction has finite retries, but never hang
+            # the request thread forever if a worker dies silently.
+            song.waiter.wait(timeout=180)
             if song.repeat_for is not None:
                 song = song.repeat_for
                 if song.waiter is not None:
-                    song.waiter.wait()
+                    song.waiter.wait(timeout=180)
             song.last_fetched_at = datetime.now()
-            self.__renew_expiry(song, None)
+            if song.error is None:
+                try:
+                    self.__renew_expiry(song, None)
+                except Exception as exc:
+                    song.error = f"Refresh failed: {exc}"
         return song
 
