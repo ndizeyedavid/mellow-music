@@ -86,7 +86,7 @@ interface Session {
  * /api/audio is never used — the <audio> element plays AUDIO_URL directly.
  */
 export function usePlayDiscovery() {
-  const { replaceQueue, currentIndex, queue } = usePlayer();
+  const { replaceQueue, restart, currentIndex, queue, isPlaying } = usePlayer();
   const [resolvingKey, setResolvingKey] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
   const runId = useRef(0);
@@ -181,11 +181,19 @@ export function usePlayDiscovery() {
       const key = keyOf(items[index], index);
       setResolvingKey(key);
       setPlayError(null);
+      // Source already on the speakers? An explicit click replays it.
+      const playingSrc =
+        isPlaying && queue[currentIndex]?.source
+          ? queue[currentIndex].source
+          : null;
       try {
         // Resolve the clicked track first for instant playback.
         const first = await toPlayableTrack(items[index], index);
         if (run !== runId.current) return;
         replaceQueue([first], 0);
+        if (playingSrc !== null && playingSrc === first.source) {
+          restart();
+        }
         // Open a session; the watcher effect grows the lookahead window.
         sessionRef.current = {
           items,
@@ -206,7 +214,7 @@ export function usePlayDiscovery() {
         if (run === runId.current) setResolvingKey(null);
       }
     },
-    [replaceQueue],
+    [replaceQueue, restart, currentIndex, queue, isPlaying],
   );
 
   const isResolving = useCallback(

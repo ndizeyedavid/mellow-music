@@ -37,12 +37,23 @@ export interface UseAudioPlayer {
   previous: () => void;
   playFrom: (index: number) => void;
   replaceQueue: (tracks: Track[], startIndex?: number) => void;
+  /** Insert tracks right after the current one (no autoplay). */
+  queueNext: (track: Track) => void;
+  /** Append a track to the end of the queue (no autoplay). */
+  queueLast: (track: Track) => void;
+  /** Swap an optimistic placeholder for its resolved track (same position). */
+  replaceQueuedTrack: (tempId: string, track: Track) => void;
+  /** Remove a queued track by id (used to revert failed placeholders). */
+  removeFromQueue: (id: string) => void;
+  /** Move a queued track; the current index follows the playing track. */
+  moveInQueue: (from: number, to: number) => void;
   seek: (time: number) => void;
   setVolumeValue: (value: number) => void;
   toggleMute: () => void;
   cycleRepeat: () => void;
   toggleShuffle: () => void;
   setCrossfade: (seconds: number) => void;
+  restart: () => void;
   clearStreamError: () => void;
 }
 
@@ -356,6 +367,83 @@ export function useAudioPlayer(
     [requestManualFade],
   );
 
+  /** Insert tracks without disturbing playback (never autoplays). */
+  const insertTracks = useCallback((newTracks: Track[], atEnd: boolean) => {
+    if (newTracks.length === 0) return;
+    setTracks((prev) => {
+      const at = atEnd ? prev.length : indexRef.current + 1;
+      const next = [...prev];
+      next.splice(Math.max(0, Math.min(at, next.length)), 0, ...newTracks);
+      return next;
+    });
+  }, []);
+
+  const queueNext = useCallback(
+    (track: Track) => insertTracks([track], false),
+    [insertTracks],
+  );
+  const queueLast = useCallback(
+    (track: Track) => insertTracks([track], true),
+    [insertTracks],
+  );
+
+  /** Fulfil an optimistic placeholder in place (never moves the index). */
+  const replaceQueuedTrack = useCallback((tempId: string, track: Track) => {
+    setTracks((prev) => {
+      if (!prev.some((t) => t.id === tempId)) return prev;
+      return prev.map((t) => (t.id === tempId ? track : t));
+    });
+  }, []);
+
+  /** Remove a queued track; the index follows the playing track. */
+  const removeFromQueue = useCallback(
+    (id: string) => {
+      const list = tracksRef.current;
+      const at = list.findIndex((t) => t.id === id);
+      if (at === -1) return;
+      const current = indexRef.current;
+      if (at === current) {
+        try {
+          frontEl()?.pause();
+        } catch {
+          // Already stopped — nothing to do.
+        }
+        setCurrentTime(0);
+        setDuration(0);
+      }
+      const next = list.filter((t) => t.id !== id);
+      setTracks(next);
+      if (next.length === 0) {
+        setIndex(0);
+        return;
+      }
+      if (at < current) setIndex(current - 1);
+      else if (at === current) setIndex(Math.min(current, next.length - 1));
+    },
+    [frontEl],
+  );
+
+  /** Reorder the queue; the current index follows the playing track. */
+  const moveInQueue = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    const length = tracksRef.current.length;
+    if (from < 0 || from >= length || to < 0 || to >= length) return;
+    const current = indexRef.current;
+    let nextIndex = current;
+    if (from === current) nextIndex = to;
+    else if (from < current && to >= current) nextIndex = current - 1;
+    else if (from > current && to <= current) nextIndex = current + 1;
+    setTracks((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    // Same-source guard in the load effect absorbs this when the playing
+    // track didn't actually change position content.
+    if (nextIndex !== current) setIndex(nextIndex);
+  }, []);
+
   // One-time wiring of both media elements. Only the front voice drives UI
   // state; the fading voice is ignored except for its natural end.
   useEffect(() => {
@@ -491,15 +579,26 @@ export function useAudioPlayer(
       const target = mutedRef.current ? 0 : volumeRef.current;
       front.volume = target;
       if (front.src !== new URL(s, window.location.href).href) {
+        // New source: load it and start playback when requested.
         front.src = s;
         front.load();
         setCurrentTime(0);
         setDuration(0);
-      } else {
+        if (isPlayingRef.current) {
+          void front.play();
+        }
+        return;
+      }
+      if (!front.paused) {
+        // Same source already playing (e.g. the queue grew underneath us
+        // via lookahead extension): leave it alone, never restart.
+        return;
+      }
+      // Same source, paused: resume from the top only when requested,
+      // otherwise preserve the paused position.
+      if (isPlayingRef.current) {
         front.currentTime = 0;
         setCurrentTime(0);
-      }
-      if (isPlayingRef.current) {
         void front.play();
       }
     };
@@ -687,6 +786,20 @@ export function useAudioPlayer(
     },
     [setCrossfadeState],
   );
+  /**
+   * Restart the current voice from the top (explicit user replay).
+   * Unlike the load effect, this always restarts — background queue
+   * growth must never call it.
+   */
+  const restart = useCallback(() => {
+    finishFade();
+    const audio = frontEl();
+    if (!audio) return;
+    isPlayingRef.current = true;
+    audio.currentTime = 0;
+    setCurrentTime(0);
+    void audio.play();
+  }, [finishFade, frontEl]);
   const clearStreamError = useCallback(() => setStreamError(null), []);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -713,12 +826,18 @@ export function useAudioPlayer(
     previous: goPrevious,
     playFrom,
     replaceQueue,
+    queueNext,
+    queueLast,
+    replaceQueuedTrack,
+    removeFromQueue,
+    moveInQueue,
     seek,
     setVolumeValue,
     toggleMute,
     cycleRepeat,
-    toggleShuffle,
-    setCrossfade,
-    clearStreamError,
+  toggleShuffle,
+  setCrossfade,
+  restart,
+  clearStreamError,
   };
 }
