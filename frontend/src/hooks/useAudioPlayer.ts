@@ -4,6 +4,34 @@ import { usePersistentState } from "../utils/usePersistentState";
 
 export type RepeatMode = "off" | "all" | "one";
 
+const PLAYER_KEY = "mellow-player-v1";
+const MAX_PERSISTED_TRACKS = 100;
+
+// Lightweight snapshot: heavy per-track details (lyrics, credits) are
+// dropped — they re-resolve on demand. Expired URLs self-heal through
+// the existing refresh path, so even day-old sessions resume cleanly.
+function sanitizeTrack(t: Track): Track {
+  return {
+    id: t.id,
+    title: t.title,
+    artist: t.artist,
+    artistId: t.artistId,
+    album: t.album,
+    albumId: t.albumId,
+    image: t.image,
+    backdrop: t.backdrop ?? null,
+    source: t.source,
+    duration: t.duration,
+    expiresAt: t.expiresAt ?? null,
+    genre: t.genre,
+    popularity: 50,
+    plays: "",
+    releaseDate: "",
+    lyrics: [],
+    credits: { writers: [], producers: [], label: "" },
+  };
+}
+
 export interface AudioPlayerOptions {
   /**
    * Resolve a fresh playable Track (new audio URL) for an expired or dead
@@ -70,11 +98,58 @@ export function useAudioPlayer(
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioRefB = useRef<HTMLAudioElement>(null);
 
-  const [tracks, setTracks] = useState<Track[]>(initialTracks);
-  const [index, setIndex] = useState(startIndex);
+  /* ---------- Session persistence (queue + track + position) ---------- */
+
+  const loadPersisted = (): {
+    tracks: Track[];
+    index: number;
+    position: number;
+  } | null => {
+    try {
+      const raw = localStorage.getItem(PLAYER_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as {
+        tracks?: unknown;
+        index?: unknown;
+        position?: unknown;
+      };
+      if (!Array.isArray(parsed.tracks) || parsed.tracks.length === 0) {
+        return null;
+      }
+      const tracks = (parsed.tracks as Track[]).filter(
+        (t) =>
+          t &&
+          typeof t.id === "string" &&
+          typeof t.source === "string" &&
+          t.source.length > 0,
+      );
+      if (tracks.length === 0) return null;
+      const index =
+        typeof parsed.index === "number"
+          ? Math.max(0, Math.min(Math.floor(parsed.index), tracks.length - 1))
+          : 0;
+      const position =
+        typeof parsed.position === "number" &&
+        Number.isFinite(parsed.position) &&
+        parsed.position > 0
+          ? parsed.position
+          : 0;
+      return { tracks, index, position };
+    } catch {
+      return null;
+    }
+  };
+
+  // Restored session snapshot (read once via state initializer below).
+  const [restored] = useState(loadPersisted);
+
+  const [tracks, setTracks] = useState<Track[]>(
+    () => restored?.tracks ?? initialTracks,
+  );
+  const [index, setIndex] = useState(() => restored?.index ?? startIndex);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [currentTime, setCurrentTime] = useState(() => restored?.position ?? 0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = usePersistentState("mellow-volume", 0.7);
   const [muted, setMuted] = useState(false);
@@ -141,6 +216,55 @@ export function useAudioPlayer(
     refreshRef.current = options.refreshTrack;
   }, [options.refreshTrack]);
 
+  // One-shot resume into the restored position (set when metadata lands).
+  const resumeRef = useRef<{ index: number; position: number } | null>(
+    restored && restored.position > 0
+      ? { index: restored.index, position: restored.position }
+      : null,
+  );
+  // Live position mirror for throttled session saves.
+  const currentTimeRef = useRef(currentTime);
+
+  const persistNow = useCallback((position?: number): void => {
+    try {
+      const payload = {
+        tracks: tracksRef.current.map(sanitizeTrack).slice(0, MAX_PERSISTED_TRACKS),
+        index: indexRef.current,
+        position:
+          typeof position === "number" ? position : currentTimeRef.current,
+      };
+      if (payload.tracks.length === 0) {
+        localStorage.removeItem(PLAYER_KEY);
+        return;
+      }
+      localStorage.setItem(PLAYER_KEY, JSON.stringify(payload));
+    } catch {
+      // Storage full/blocked — session restore is best-effort.
+    }
+  }, []);
+
+  // Save the session whenever the queue changes, periodically while
+  // playing, and on tab hide/close.
+  useEffect(() => {
+    persistNow();
+  }, [tracks, index, persistNow]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (isPlayingRef.current) persistNow();
+    }, 5000);
+    const flush = () => persistNow();
+    const flushOnHide = () => {
+      if (document.visibilityState === "hidden") persistNow();
+    };
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", flushOnHide);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", flushOnHide);
+    };
+  }, [persistNow]);
+
   /* ---------------- Crossfade engine (dual element) ---------------- */
 
   const elementAt = useCallback(
@@ -190,6 +314,7 @@ export function useAudioPlayer(
       newEl.src = src;
       newEl.load();
       setCurrentTime(0);
+      currentTimeRef.current = 0;
       setDuration(0);
       const dur = Math.max(0.4, seconds);
       fadeRef.current = {
@@ -270,6 +395,7 @@ export function useAudioPlayer(
         audio.load();
         audio.currentTime = Math.max(0, position);
         setCurrentTime(audio.currentTime);
+        currentTimeRef.current = audio.currentTime;
         if (isPlayingRef.current) {
           await audio.play();
         }
@@ -409,6 +535,7 @@ export function useAudioPlayer(
           // Already stopped — nothing to do.
         }
         setCurrentTime(0);
+        currentTimeRef.current = 0;
         setDuration(0);
       }
       const next = list.filter((t) => t.id !== id);
@@ -458,6 +585,7 @@ export function useAudioPlayer(
 
       const onTime = () => {
         if (!isFront()) return;
+        currentTimeRef.current = audio.currentTime;
         setCurrentTime(audio.currentTime);
         // Auto crossfade: hand over early so the voices overlap.
         const fadeLength = crossfadeRef.current;
@@ -479,13 +607,29 @@ export function useAudioPlayer(
       };
       const onMeta = () => {
         if (!isFront()) return;
-        setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+        const known = Number.isFinite(audio.duration) ? audio.duration : 0;
+        setDuration(known);
+        // One-shot resume into the restored position.
+        const resume = resumeRef.current;
+        if (resume && indexRef.current === resume.index && known > 0) {
+          resumeRef.current = null;
+          if (resume.position > 1 && resume.position < known) {
+            audio.currentTime = resume.position;
+            currentTimeRef.current = resume.position;
+            setCurrentTime(resume.position);
+          }
+        } else if (resume) {
+          resumeRef.current = null;
+        }
       };
       const onPlay = () => {
         if (isFront()) setIsPlaying(true);
       };
       const onPause = () => {
-        if (isFront()) setIsPlaying(false);
+        if (!isFront()) return;
+        setIsPlaying(false);
+        currentTimeRef.current = audio.currentTime;
+        persistNow(audio.currentTime);
       };
       const onWaiting = () => {
         if (isFront()) setIsBuffering(true);
@@ -501,6 +645,7 @@ export function useAudioPlayer(
         }
         if (repeatRef.current === "one") {
           audio.currentTime = 0;
+          currentTimeRef.current = 0;
           void audio.play();
           return;
         }
@@ -510,6 +655,7 @@ export function useAudioPlayer(
         } else {
           setIsPlaying(false);
           setCurrentTime(0);
+          currentTimeRef.current = 0;
         }
       };
       const onError = () => {
@@ -555,7 +701,7 @@ export function useAudioPlayer(
     return () => {
       cleanups.forEach((fn) => fn());
     };
-  }, [goNext, computeNextIndex, attemptRefresh, frontEl, finishFade]);
+  }, [goNext, computeNextIndex, attemptRefresh, frontEl, finishFade, persistNow]);
 
   // Load the track when the index changes. When the front voice is audibly
   // playing something else, overlap into the new track (crossfade) instead
@@ -567,6 +713,10 @@ export function useAudioPlayer(
     if (!track || !track.source) return;
     let cancelled = false;
     refreshFailedFor.current = null;
+    // A resume aimed at another track is stale — drop it.
+    if (resumeRef.current && resumeRef.current.index !== index) {
+      resumeRef.current = null;
+    }
     // A fade started for another index was interrupted — finish it first.
     if (fadeRef.current && fadeForIndexRef.current !== index) {
       finishFade();
@@ -583,6 +733,7 @@ export function useAudioPlayer(
         front.src = s;
         front.load();
         setCurrentTime(0);
+        currentTimeRef.current = 0;
         setDuration(0);
         if (isPlayingRef.current) {
           void front.play();
@@ -599,6 +750,7 @@ export function useAudioPlayer(
       if (isPlayingRef.current) {
         front.currentTime = 0;
         setCurrentTime(0);
+        currentTimeRef.current = 0;
         void front.play();
       }
     };
@@ -716,10 +868,12 @@ export function useAudioPlayer(
   const seek = useCallback(
     (time: number) => {
       finishFade();
+      resumeRef.current = null;
       const audio = frontEl();
       if (!audio || !Number.isFinite(audio.duration)) return;
       const clamped = Math.min(Math.max(time, 0), audio.duration);
       audio.currentTime = clamped;
+      currentTimeRef.current = clamped;
       setCurrentTime(clamped);
     },
     [finishFade, frontEl],
@@ -798,6 +952,7 @@ export function useAudioPlayer(
     isPlayingRef.current = true;
     audio.currentTime = 0;
     setCurrentTime(0);
+    currentTimeRef.current = 0;
     void audio.play();
   }, [finishFade, frontEl]);
   const clearStreamError = useCallback(() => setStreamError(null), []);
