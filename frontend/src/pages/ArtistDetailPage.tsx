@@ -1,49 +1,99 @@
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MdPlayArrow, MdVerified } from "react-icons/md";
-import { SongRow } from "../components/SongRow";
-import { AlbumCard } from "../components/AlbumCard";
-import { ArtistCard } from "../components/ArtistCard";
+import { ApiAlbumCard } from "../components/ApiCards";
+import { ApiTrackList } from "../components/ApiTrackList";
+import { SafeImage } from "../components/SafeImage";
 import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import { albumById, albums, artistById, artists, songs } from "../data/library";
+import { usePlayDiscovery } from "../hooks/usePlayDiscovery";
+import {
+  getArtist,
+  type ApiAlbum,
+  type ApiArtist,
+  type ApiDiscoveryItem,
+} from "../api/music";
 
-/** Artist profile: hero, verified badge, popular tracks, albums, related artists. */
+/** Artist profile, live from GET /api/artist/{id}. */
 export function ArtistDetailPage() {
   const { id = "" } = useParams();
-  const artist = artistById(id);
-  const { currentTrack, isPlaying, replaceQueue } = usePlayer();
-  const { isArtistFollowed, toggleFollowArtist } = useLibrary();
+  // Keyed so a fresh loading state starts per artist (no setState-in-effect).
+  return <ArtistDetail key={id} id={id} />;
+}
+
+function ArtistDetail({ id }: { id: string }) {
+  const [artist, setArtist] = useState<ApiArtist | null>(null);
+  const [topTracks, setTopTracks] = useState<ApiDiscoveryItem[]>([]);
+  const [albums, setAlbums] = useState<ApiAlbum[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   useDocumentTitle(artist?.name);
+  const { currentTrack, isPlaying } = usePlayer();
+  const { isArtistFollowed, toggleFollowArtist } = useLibrary();
+  const { playItems, isResolving, resolvingKey } = usePlayDiscovery();
   const following = isArtistFollowed(id);
 
-  if (!artist) {
+  useEffect(() => {
+    let cancelled = false;
+    getArtist(id)
+      .then((data) => {
+        if (cancelled) return;
+        setArtist(data.artist);
+        setTopTracks(data.top_tracks);
+        setAlbums(data.albums);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load artist.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="pb-4">
+        <div className="h-64 animate-pulse bg-white/5 md:h-80" />
+        <div className="px-6 pt-6 md:px-10">
+          <div className="h-10 w-1/3 animate-pulse rounded bg-white/5" />
+          <div className="mt-3 h-4 w-1/4 animate-pulse rounded bg-white/5" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !artist) {
     return (
       <div className="px-6 pt-6 text-center">
         <p className="text-[16px] font-medium text-fg">Artist not found</p>
+        <p className="mt-1 text-[13px] text-subtle">{error}</p>
         <Link
-          to="/artists"
+          to="/"
           className="mt-3 inline-block text-[14px] font-semibold text-accent hover:underline"
         >
-          Back to artists
+          Back to home
         </Link>
       </div>
     );
   }
 
-  const topSongs = songs
-    .filter((song) => song.artistId === artist.id)
-    .sort((a, b) => b.popularity - a.popularity)
-    .slice(0, 5);
-  const topAlbums = albums.filter((album) => album.artistId === artist.id);
-  const related = artists.filter((item) => artist.relatedIds.includes(item.id));
+  const fans =
+    artist.fans > 0
+      ? `${Intl.NumberFormat("en", { notation: "compact" }).format(artist.fans)} fans`
+      : "";
 
   return (
     <div className="pb-4">
       {/* Hero */}
       <section className="relative h-64 md:h-80">
-        <img
-          src={artist.image}
+        <SafeImage
+          src={artist.picture}
           alt={artist.name}
           className="absolute inset-0 h-full w-full object-cover"
         />
@@ -53,17 +103,16 @@ export function ArtistDetailPage() {
             <h1 className="text-4xl/[48px] font-bold md:text-6xl/[64px]">
               {artist.name}
             </h1>
-            {artist.verified && (
-              <MdVerified
-                size={28}
-                className="text-[#3d91f4]"
-                aria-label="Verified artist"
-              />
-            )}
+            <MdVerified
+              size={28}
+              className="text-[#3d91f4]"
+              aria-label="Verified artist"
+            />
           </div>
           <p className="mt-2 text-[13px]/[18px] text-fg/70">
-            {artist.monthlyListeners} monthly listeners • {artist.followers}{" "}
-            followers
+            {[fans, artist.nb_albums ? `${artist.nb_albums} albums` : ""]
+              .filter(Boolean)
+              .join(" • ")}
           </p>
         </div>
       </section>
@@ -72,8 +121,8 @@ export function ArtistDetailPage() {
       <div className="flex items-center gap-4 px-6 md:px-10">
         <button
           type="button"
-          onClick={() => replaceQueue(topSongs, 0)}
-          disabled={topSongs.length === 0}
+          onClick={() => topTracks.length > 0 && void playItems(topTracks, 0)}
+          disabled={topTracks.length === 0 || resolvingKey !== null}
           className="flex cursor-pointer items-center gap-1.5 rounded-full bg-fg px-6 py-3 text-[14px]/[20px] font-semibold text-[#171719] transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <MdPlayArrow size={20} /> Play
@@ -93,54 +142,28 @@ export function ArtistDetailPage() {
       </div>
 
       {/* Popular tracks */}
-      <section className="mt-8 px-6 md:px-10">
-        <h2 className="text-[18px]/[24px] font-semibold text-fg">Popular</h2>
-        <ul className="mt-2">
-          {topSongs.map((song, index) => (
-            <SongRow
-              key={song.id}
-              song={song}
-              index={index}
-              isCurrent={currentTrack.id === song.id}
-              isPlaying={isPlaying}
-              onPlay={() => replaceQueue(topSongs, index)}
-              showAlbum={false}
-            />
-          ))}
-        </ul>
-      </section>
-
-      {/* Top albums */}
-      <section className="mt-8 px-6 md:px-10">
-        <h2 className="text-[18px]/[24px] font-semibold text-fg">Albums</h2>
-        <div className="no-scrollbar mt-4 flex gap-6 overflow-x-auto">
-          {topAlbums.map((album) => (
-            <AlbumCard
-              key={album.id}
-              to={`/album/${album.id}`}
-              image={album.image}
-              title={album.title}
-              subtitle={albumById(album.id)?.label ?? `${album.year}`}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* About */}
-      <section className="mt-8 max-w-2xl px-6 md:px-10">
-        <h2 className="text-[18px]/[24px] font-semibold text-fg">About</h2>
-        <p className="mt-2 text-[14px]/[22px] text-fg/70">{artist.bio}</p>
-      </section>
-
-      {/* Related artists */}
-      {related.length > 0 && (
+      {topTracks.length > 0 && (
         <section className="mt-8 px-6 md:px-10">
-          <h2 className="text-[18px]/[24px] font-semibold text-fg">
-            Fans also like
-          </h2>
-          <div className="mt-4 flex flex-wrap gap-4">
-            {related.map((item) => (
-              <ArtistCard key={item.id} artist={item} />
+          <h2 className="text-[18px]/[24px] font-semibold text-fg">Popular</h2>
+          <ApiTrackList
+            items={topTracks}
+            currentTitle={currentTrack?.title}
+            isPlaying={isPlaying}
+            onPlay={(index) => void playItems(topTracks, index)}
+            isResolvingItem={isResolving}
+            resolvingActive={resolvingKey !== null}
+            enableAdd
+          />
+        </section>
+      )}
+
+      {/* Albums */}
+      {albums.length > 0 && (
+        <section className="mt-8 px-6 md:px-10">
+          <h2 className="text-[18px]/[24px] font-semibold text-fg">Albums</h2>
+          <div className="no-scrollbar mt-4 flex gap-6 overflow-x-auto">
+            {albums.map((album) => (
+              <ApiAlbumCard key={album.id} album={album} />
             ))}
           </div>
         </section>

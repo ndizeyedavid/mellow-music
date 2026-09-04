@@ -1,21 +1,33 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { SongRow } from "../components/SongRow";
-import { AlbumCard } from "../components/AlbumCard";
-import { ArtistCard } from "../components/ArtistCard";
-import { PlaylistCard } from "../components/PlaylistCard";
-import { GenreCard } from "../components/GenreCard";
+import { MdPlayArrow } from "react-icons/md";
 import { EmptyState } from "../components/EmptyState";
+import { SafeImage } from "../components/SafeImage";
+import { SectionSlider } from "../components/SectionSlider";
+import { ApiTrackList } from "../components/ApiTrackList";
+import {
+  ApiAlbumCard,
+  ApiArtistCard,
+  ApiGenreCard,
+  ApiPlaylistCard,
+} from "../components/ApiCards";
 import { usePlayer } from "../context/PlayerContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { usePlayDiscovery } from "../hooks/usePlayDiscovery";
 import {
-  albums,
-  artistById,
-  artists,
-  genres,
-  playlists,
-  songs,
-} from "../data/library";
+  getCharts,
+  getGenres,
+  searchAlbums,
+  searchApi,
+  searchArtists,
+  searchPlaylists,
+  type ApiAlbum,
+  type ApiArtist,
+  type ApiDiscoveryItem,
+  type ApiGenre,
+  type ApiPlaylist,
+} from "../api/music";
+import { formatTime } from "../utils/format";
 
 type Tab = "all" | "songs" | "albums" | "artists" | "playlists";
 
@@ -27,72 +39,63 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: "playlists", label: "Playlists" },
 ];
 
-/** Unified search results grouped by songs, albums, artists and playlists. */
+/** Live search across songs, albums, artists and playlists. No mock data. */
 export function SearchPage() {
   const [searchParams] = useSearchParams();
   const query = (searchParams.get("q") ?? "").trim();
-  const q = query.toLowerCase();
-  const [tab, setTab] = useState<Tab>("all");
   useDocumentTitle(query ? `Search: ${query}` : "Search");
 
-  const { currentTrack, isPlaying, replaceQueue } = usePlayer();
-
-  const songMatches = useMemo(
-    () =>
-      songs.filter(
-        (song) =>
-          song.title.toLowerCase().includes(q) ||
-          song.artist.toLowerCase().includes(q) ||
-          song.album.toLowerCase().includes(q),
-      ),
-    [q],
-  );
-  const albumMatches = useMemo(
-    () =>
-      albums.filter(
-        (album) =>
-          album.title.toLowerCase().includes(q) ||
-          artistById(album.artistId)?.name.toLowerCase().includes(q),
-      ),
-    [q],
-  );
-  const artistMatches = useMemo(
-    () =>
-      artists.filter(
-        (artist) =>
-          artist.name.toLowerCase().includes(q) ||
-          artist.bio.toLowerCase().includes(q),
-      ),
-    [q],
-  );
-  const playlistMatches = useMemo(
-    () =>
-      playlists.filter(
-        (playlist) =>
-          playlist.name.toLowerCase().includes(q) ||
-          playlist.description.toLowerCase().includes(q),
-      ),
-    [q],
-  );
-
-  // Empty query -> browse everything
+  // Empty query -> live browse. Keyed results reset tab + fetch per query
+  // (no setState-in-effect).
   if (!query) {
-    return (
-      <div className="px-6 pt-6">
-        <h1 className="text-2xl/[32px] font-bold text-fg">Browse all</h1>
-        <div className="mt-6 flex flex-wrap gap-4">
-          {genres.map((genre) => (
-            <GenreCard key={genre.name} genre={genre} />
-          ))}
-          {artists.slice(0, 4).map((artist) => (
-            <ArtistCard key={artist.id} artist={artist} />
-          ))}
-        </div>
-      </div>
-    );
+    return <BrowseAll />;
   }
+  return <SearchResults key={query} query={query} />;
+}
+
+function SearchResults({ query }: { query: string }) {
+  const [tab, setTab] = useState<Tab>("all");
+
+  const { currentTrack, isPlaying } = usePlayer();
+  const { playItems, isResolving, resolvingKey, playError, clearPlayError } =
+    usePlayDiscovery();
+
+  const [songs, setSongs] = useState<ApiDiscoveryItem[]>([]);
+  const [albums, setAlbums] = useState<ApiAlbum[]>([]);
+  const [artists, setArtists] = useState<ApiArtist[]>([]);
+  const [playlists, setPlaylists] = useState<ApiPlaylist[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Debounced multi-type search: all four endpoints in parallel.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      Promise.all([
+        searchApi(query, 10),
+        searchAlbums(query, 8),
+        searchArtists(query, 8),
+        searchPlaylists(query, 8),
+      ])
+        .then(([songRes, albumRes, artistRes, playlistRes]) => {
+          setSongs(songRes);
+          setAlbums(albumRes);
+          setArtists(artistRes);
+          setPlaylists(playlistRes);
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Search failed.");
+        })
+        .finally(() => setLoading(false));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   const show = (id: Tab) => tab === "all" || tab === id;
+  const hasAny =
+    songs.length > 0 ||
+    albums.length > 0 ||
+    artists.length > 0 ||
+    playlists.length > 0;
 
   return (
     <div className="px-6 pt-6">
@@ -120,90 +123,348 @@ export function SearchPage() {
         ))}
       </div>
 
-      {/* Suggestions + results */}
-      {show("songs") && songMatches.length > 0 && (
-        <section className="mt-6">
-          <h2 className="text-[18px]/[24px] font-semibold text-fg">
-            Songs ({songMatches.length})
-          </h2>
-          <ul className="mt-2">
-            {songMatches.slice(0, 10).map((song, index) => (
-              <SongRow
-                key={song.id}
-                song={song}
-                index={index}
-                isCurrent={currentTrack.id === song.id}
-                isPlaying={isPlaying}
-                onPlay={() => replaceQueue(songMatches, index)}
-                showPopularity
+      {playError && (
+        <div
+          role="alert"
+          className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-danger/40 bg-elevated px-4 py-2.5 text-[13px] font-medium text-fg"
+        >
+          <span>{playError}</span>
+          <button
+            type="button"
+            onClick={clearPlayError}
+            aria-label="Dismiss playback error"
+            className="cursor-pointer text-subtle hover:text-fg"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-8 space-y-3" aria-label="Searching">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-3 rounded-xl p-3"
+              aria-hidden="true"
+            >
+              <div className="h-12 w-12 animate-pulse rounded-lg bg-white/5" />
+              <div className="flex-1">
+                <div className="h-4 w-1/3 animate-pulse rounded bg-white/5" />
+                <div className="mt-1.5 h-3 w-1/4 animate-pulse rounded bg-white/5" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && error && (
+        <p className="mt-6 text-[14px] text-subtle">Search failed: {error}</p>
+      )}
+
+      {!loading && !error && (
+        <>
+          {tab === "all" ? (
+            <AllResults
+              songs={songs}
+              albums={albums}
+              artists={artists}
+              playlists={playlists}
+              currentTitle={currentTrack?.title}
+              isPlaying={isPlaying}
+              onPlaySongs={(items, i) => void playItems(items, i)}
+              isResolvingItem={isResolving}
+              resolvingActive={resolvingKey !== null}
+            />
+          ) : (
+            <>
+              {show("songs") && songs.length > 0 && (
+                <section className="mt-6" aria-label="Songs">
+                  <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                    Songs
+                  </h2>
+                  <ApiTrackList
+                    items={songs}
+                    currentTitle={currentTrack?.title}
+                    isPlaying={isPlaying}
+                    onPlay={(i) => void playItems(songs, i)}
+                    isResolvingItem={isResolving}
+                    resolvingActive={resolvingKey !== null}
+                    enableAdd
+                  />
+                </section>
+              )}
+
+              {show("albums") && albums.length > 0 && (
+                <section className="mt-8" aria-label="Albums">
+                  <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                    Albums
+                  </h2>
+                  <div className="mt-4 flex flex-wrap gap-6">
+                    {albums.map((album) => (
+                      <ApiAlbumCard key={album.id} album={album} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {show("artists") && artists.length > 0 && (
+                <section className="mt-8" aria-label="Artists">
+                  <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                    Artists
+                  </h2>
+                  <div className="mt-4 flex flex-wrap gap-4">
+                    {artists.map((artist) => (
+                      <ApiArtistCard key={artist.id} artist={artist} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {show("playlists") && playlists.length > 0 && (
+                <section className="mt-8" aria-label="Playlists">
+                  <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                    Playlists
+                  </h2>
+                  <div className="mt-4 flex flex-wrap gap-6">
+                    {playlists.map((playlist) => (
+                      <ApiPlaylistCard key={playlist.id} playlist={playlist} />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {!hasAny && (
+            <EmptyState
+              title={`No results for "${query}"`}
+              description="Check the spelling or try a different search."
+              action={
+                <Link
+                  to="/"
+                  className="inline-block text-[14px] font-semibold text-accent hover:underline"
+                >
+                  Back to home
+                </Link>
+              }
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* "All" tab: Top Result hero + songs + sliders                        */
+/* ------------------------------------------------------------------ */
+
+function AllResults({
+  songs,
+  albums,
+  artists,
+  playlists,
+  currentTitle,
+  isPlaying,
+  onPlaySongs,
+  isResolvingItem,
+  resolvingActive,
+}: {
+  songs: ApiDiscoveryItem[];
+  albums: ApiAlbum[];
+  artists: ApiArtist[];
+  playlists: ApiPlaylist[];
+  currentTitle?: string;
+  isPlaying: boolean;
+  onPlaySongs: (items: ApiDiscoveryItem[], index: number) => void;
+  isResolvingItem: (item: ApiDiscoveryItem, index: number) => boolean;
+  resolvingActive: boolean;
+}) {
+  const top = songs[0];
+  const topTitle = top?.title?.trim() || "Unknown title";
+  const topArtist = top?.artist?.trim() || "Unknown artist";
+  const topResolving = top ? isResolvingItem(top, 0) : false;
+
+  return (
+    <>
+      {songs.length > 0 && (
+        <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          {/* Top result hero */}
+          <section aria-label="Top result">
+            <h2 className="text-[18px]/[24px] font-semibold text-fg">
+              Top result
+            </h2>
+            <div className="group relative mt-2 overflow-hidden rounded-2xl border border-border bg-elevated p-5 transition-colors hover:bg-white/5">
+              <SafeImage
+                src={top?.thumbnail ?? ""}
+                alt=""
+                className="h-24 w-24 rounded-xl object-cover shadow-lg"
               />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {show("albums") && albumMatches.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-[18px]/[24px] font-semibold text-fg">
-            Albums ({albumMatches.length})
-          </h2>
-          <div className="mt-4 flex flex-wrap gap-6">
-            {albumMatches.slice(0, 8).map((album) => (
-              <AlbumCard
-                key={album.id}
-                to={`/album/${album.id}`}
-                image={album.image}
-                title={album.title}
-                subtitle={artistById(album.artistId)?.name ?? ""}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {show("artists") && artistMatches.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-[18px]/[24px] font-semibold text-fg">
-            Artists ({artistMatches.length})
-          </h2>
-          <div className="mt-4 flex flex-wrap gap-4">
-            {artistMatches.slice(0, 8).map((artist) => (
-              <ArtistCard key={artist.id} artist={artist} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {show("playlists") && playlistMatches.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-[18px]/[24px] font-semibold text-fg">
-            Playlists ({playlistMatches.length})
-          </h2>
-          <div className="mt-4 flex flex-wrap gap-6">
-            {playlistMatches.slice(0, 8).map((playlist) => (
-              <PlaylistCard key={playlist.id} playlist={playlist} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {songMatches.length === 0 &&
-        albumMatches.length === 0 &&
-        artistMatches.length === 0 &&
-        playlistMatches.length === 0 && (
-          <EmptyState
-            title={`No results for "${query}"`}
-            description="Check the spelling or try a different search."
-            action={
               <Link
-                to="/tracks"
-                className="inline-block text-[14px] font-semibold text-accent hover:underline"
+                to={`/song/${encodeURIComponent(topTitle)}`}
+                className="mt-4 block truncate text-2xl font-bold text-fg transition-colors hover:text-accent"
               >
-                Browse all tracks instead
+                {topTitle}
               </Link>
-            }
-          />
-        )}
+              <p className="mt-1 truncate text-[14px]/[20px] text-subtle">
+                {topArtist}
+                {typeof top?.duration === "number" && (top?.duration ?? 0) > 0
+                  ? ` • ${formatTime(top?.duration ?? 0)}`
+                  : ""}
+              </p>
+              <span className="mt-2 inline-block rounded-full bg-white/10 px-3 py-1 text-[11px]/[14px] font-semibold uppercase tracking-wide text-fg">
+                Song
+              </span>
+              <button
+                type="button"
+                onClick={() => onPlaySongs(songs, 0)}
+                disabled={resolvingActive}
+                aria-label={
+                  topResolving ? `Loading ${topTitle}` : `Play ${topTitle}`
+                }
+                className="absolute bottom-5 right-5 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full bg-fg text-[#171719] opacity-0 shadow-md-dark transition-all duration-200 group-hover:opacity-100 hover:scale-105 disabled:cursor-wait disabled:opacity-100"
+              >
+                {topResolving ? (
+                  <span
+                    className="h-5 w-5 animate-spin rounded-full border-2 border-[#171719]/20 border-t-[#171719]"
+                    role="status"
+                    aria-label="Loading"
+                  />
+                ) : (
+                  <MdPlayArrow size={24} />
+                )}
+              </button>
+            </div>
+          </section>
+
+          {/* Top songs */}
+          <section aria-label="Top songs">
+            <h2 className="text-[18px]/[24px] font-semibold text-fg">Songs</h2>
+            <ApiTrackList
+              items={songs.slice(0, 5)}
+              currentTitle={currentTitle}
+              isPlaying={isPlaying}
+              onPlay={(i) => onPlaySongs(songs, i)}
+              isResolvingItem={isResolvingItem}
+              resolvingActive={resolvingActive}
+              enableAdd
+            />
+          </section>
+        </div>
+      )}
+
+      {albums.length > 0 && (
+        <div className="mt-8">
+          <SectionSlider title="Albums">
+            {albums.slice(0, 8).map((album) => (
+              <ApiAlbumCard key={album.id} album={album} />
+            ))}
+          </SectionSlider>
+        </div>
+      )}
+
+      {artists.length > 0 && (
+        <div className="mt-8">
+          <SectionSlider title="Artists" gap="gap-4">
+            {artists.slice(0, 8).map((artist) => (
+              <ApiArtistCard key={artist.id} artist={artist} />
+            ))}
+          </SectionSlider>
+        </div>
+      )}
+
+      {playlists.length > 0 && (
+        <div className="mt-8">
+          <SectionSlider title="Playlists">
+            {playlists.slice(0, 8).map((playlist) => (
+              <ApiPlaylistCard key={playlist.id} playlist={playlist} />
+            ))}
+          </SectionSlider>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty query: live genres + chart artists                            */
+/* ------------------------------------------------------------------ */
+
+function BrowseAll() {
+  const [genres, setGenres] = useState<ApiGenre[]>([]);
+  const [artists, setArtists] = useState<ApiArtist[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getGenres(), getCharts(8)])
+      .then(([genreData, charts]) => {
+        if (cancelled) return;
+        setGenres(genreData);
+        setArtists(charts.artists);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGenres([]);
+          setArtists([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="px-6 pt-6">
+      <h1 className="text-2xl/[32px] font-bold text-fg">Browse all</h1>
+      {loading ? (
+        <div className="mt-6 flex flex-wrap gap-4" aria-label="Loading browse">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-24 w-40 animate-pulse rounded-lg bg-white/5"
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+      ) : (
+        <>
+          {genres.length > 0 && (
+            <section className="mt-6" aria-label="Genres">
+              <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                Genres
+              </h2>
+              <div className="mt-4 flex flex-wrap gap-4">
+                {genres.slice(0, 12).map((genre) => (
+                  <ApiGenreCard key={genre.id} genre={genre} />
+                ))}
+              </div>
+            </section>
+          )}
+          {artists.length > 0 && (
+            <section className="mt-8" aria-label="Artists">
+              <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                Popular artists
+              </h2>
+              <div className="mt-4 flex flex-wrap gap-4">
+                {artists.slice(0, 8).map((artist) => (
+                  <ApiArtistCard key={artist.id} artist={artist} />
+                ))}
+              </div>
+            </section>
+          )}
+          {genres.length === 0 && artists.length === 0 && (
+            <p className="mt-6 text-[14px] text-subtle">
+              Couldn&apos;t load browse content. Check your connection and try
+              searching instead.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }
