@@ -58,6 +58,10 @@ export interface UseAudioPlayer {
   shuffle: boolean;
   /** Crossfade length in seconds (0 = off). Persisted. */
   crossfade: number;
+  /** Autoplay: keep going with mix tracks when the queue ends. Persisted. */
+  autoplay: boolean;
+  /** Increments each time the queue ends with no next track. */
+  queueEnded: number;
   progress: number;
   streamError: string | null;
   togglePlay: () => void;
@@ -82,6 +86,9 @@ export interface UseAudioPlayer {
   toggleShuffle: () => void;
   setCrossfade: (seconds: number) => void;
   restart: () => void;
+  toggleAutoplay: () => void;
+  /** Stop playback UI (used when autoplay can't continue). */
+  halt: () => void;
   clearStreamError: () => void;
 }
 
@@ -159,6 +166,11 @@ export function useAudioPlayer(
     "mellow-crossfade",
     5,
   );
+  const [autoplay, setAutoplayState] = usePersistentState(
+    "mellow-autoplay",
+    true,
+  );
+  const [queueEnded, setQueueEnded] = useState(0);
   const [streamError, setStreamError] = useState<string | null>(null);
 
   // Refs mirroring state so the one-time audio listeners always read fresh values.
@@ -209,6 +221,10 @@ export function useAudioPlayer(
   useEffect(() => {
     crossfadeRef.current = crossfade;
   }, [crossfade]);
+  const autoplayRef = useRef(autoplay);
+  useEffect(() => {
+    autoplayRef.current = autoplay;
+  }, [autoplay]);
   useEffect(() => {
     tracksRef.current = tracks;
   }, [tracks]);
@@ -652,6 +668,11 @@ export function useAudioPlayer(
         const nxt = computeNextIndex();
         if (nxt !== null) {
           setIndex(nxt);
+        } else if (autoplayRef.current && tracksRef.current.length > 0) {
+          // Queue exhausted with autoplay on: signal the session to keep
+          // going with mix tracks instead of stopping.
+          setIsBuffering(true);
+          setQueueEnded((c) => c + 1);
         } else {
           setIsPlaying(false);
           setCurrentTime(0);
@@ -934,6 +955,18 @@ export function useAudioPlayer(
     [],
   );
   const toggleShuffle = useCallback(() => setShuffle((on) => !on), []);
+  const toggleAutoplay = useCallback(
+    () => setAutoplayState((on) => !on),
+    [setAutoplayState],
+  );
+  /** Stop all playback UI (queue exhausted and autoplay can't continue). */
+  const halt = useCallback(() => {
+    finishFade();
+    setIsPlaying(false);
+    setIsBuffering(false);
+    setCurrentTime(0);
+    currentTimeRef.current = 0;
+  }, [finishFade]);
   const setCrossfade = useCallback(
     (seconds: number) => {
       setCrossfadeState(Math.min(12, Math.max(0, seconds)));
@@ -974,6 +1007,8 @@ export function useAudioPlayer(
     repeat,
     shuffle,
     crossfade,
+    autoplay,
+    queueEnded,
     progress,
     streamError,
     togglePlay,
@@ -990,9 +1025,11 @@ export function useAudioPlayer(
     setVolumeValue,
     toggleMute,
     cycleRepeat,
-  toggleShuffle,
-  setCrossfade,
-  restart,
-  clearStreamError,
+    toggleShuffle,
+    setCrossfade,
+    restart,
+    toggleAutoplay,
+    halt,
+    clearStreamError,
   };
 }

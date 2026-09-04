@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
 import {
+  getMix,
   resolveDiscoveryItem,
   type ApiDiscoveryItem,
 } from "../api/music";
 import type { Track } from "../types";
 import { usePlayer } from "../context/PlayerContext";
+import { usePlaylists } from "../context/PlaylistContext";
+import { buildTaste } from "../utils/taste";
+import { useHistory } from "../utils/history";
 
 /**
  * Anything playable: a discovery item, optionally carrying a snapshot
@@ -73,6 +78,10 @@ interface Session {
   run: number;
   /** Directions with an extension already in flight. */
   busy: Set<1 | -1>;
+  /** Autoplay already fired for this session. */
+  autoplayed: boolean;
+  /** Autoplay toast already shown for this session. */
+  autoplayNotified: boolean;
 }
 
 /**
@@ -86,7 +95,18 @@ interface Session {
  * /api/audio is never used — the <audio> element plays AUDIO_URL directly.
  */
 export function usePlayDiscovery() {
-  const { replaceQueue, restart, currentIndex, queue, isPlaying } = usePlayer();
+  const {
+    replaceQueue,
+    restart,
+    currentIndex,
+    queue,
+    isPlaying,
+    autoplay,
+    queueEnded,
+    halt,
+  } = usePlayer();
+  const { playlists } = usePlaylists();
+  const history = useHistory();
   const [resolvingKey, setResolvingKey] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
   const runId = useRef(0);
@@ -175,6 +195,111 @@ export function usePlayDiscovery() {
     }
   }, [currentIndex, queue, extend]);
 
+  // Autoplay: when the queue ends, keep going with mix tracks seeded
+  // from the listener's taste instead of stopping.
+  useEffect(() => {
+    if (queueEnded === 0) return;
+    const session = sessionRef.current;
+    if (!session || session.run !== runId.current || session.autoplayed) {
+      return;
+    }
+    // Only the session owning the finished track continues; anything else
+    // means the queue moved on (or another instance owns it).
+    const lastIdx = session.queueIdx[session.queueIdx.length - 1];
+    const lastTrack = session.byIndex.get(lastIdx);
+    if (!lastTrack || queue[currentIndex]?.id !== lastTrack.id) return;
+    if (!autoplay) {
+      session.autoplayed = true;
+      halt();
+      return;
+    }
+    const taste = buildTaste(history, playlists);
+    if (taste.artists.length === 0) {
+      session.autoplayed = true;
+      halt();
+      return;
+    }
+    session.autoplayed = true;
+    const run = session.run;
+    const knownTitles = [
+      ...session.items.map((i) => (i.title ?? "").trim()),
+      ...queue.map((t) => t.title),
+    ];
+    getMix(taste.artists, [...taste.exclude, ...knownTitles], 10)
+      .then((mix) => {
+        const live = sessionRef.current;
+        if (!live || live.run !== run || live.run !== runId.current) return;
+        // User moved on while the mix brewed — never hijack playback.
+        if (live.byIndex.get(live.currentItem)?.id !== lastTrack.id) return;
+        const known = new Set(
+          [...live.byIndex.values()].map((t) => t.id),
+        );
+        const fresh = mix.tracks.filter((t) => !known.has(t.id as string));
+        if (fresh.length === 0) {
+          halt();
+          return;
+        }
+        const base = live.items.length;
+        live.items = [...live.items, ...fresh];
+        const resolveOne = (k: number): Promise<Track | null> =>
+          toPlayableTrack(fresh[k], base + k).then(
+            (track) => {
+              const cur = sessionRef.current;
+              if (!cur || cur.run !== run) return null;
+              cur.byIndex.set(base + k, track);
+              return track;
+            },
+            () => {
+              sessionRef.current?.failed.add(base + k);
+              return null;
+            },
+          );
+        const syncQueue = (cur: Session) => {
+          cur.queueIdx = [...cur.byIndex.keys()].sort((a, b) => a - b);
+          const tracks = cur.queueIdx.map(
+            (i) => cur.byIndex.get(i) as Track,
+          );
+          const pos = cur.queueIdx.indexOf(cur.currentItem);
+          if (pos >= 0) replaceQueue(tracks, pos);
+        };
+        // Start the first fresh track urgently, fill the rest behind it.
+        void resolveOne(0).then((first) => {
+          const cur = sessionRef.current;
+          if (!cur || cur.run !== run) return;
+          // User moved on while resolving — never hijack playback.
+          if (cur.byIndex.get(cur.currentItem)?.id !== lastTrack.id) return;
+          if (!first) {
+            halt();
+            return;
+          }
+          cur.currentItem = base;
+          syncQueue(cur);
+          if (!cur.autoplayNotified) {
+            cur.autoplayNotified = true;
+            toast.success(
+              `Autoplay — kept going with ${mix.name || "your mix"}`,
+              { id: `autoplay-${run}` },
+            );
+          }
+          fresh.forEach((_, k) => {
+            if (k === 0) return;
+            void resolveOne(k).then((track) => {
+              const c2 = sessionRef.current;
+              if (!track || !c2 || c2.run !== run) return;
+              syncQueue(c2);
+            });
+          });
+        });
+      })
+      .catch(() => {
+        const cur = sessionRef.current;
+        if (!cur || cur.run !== run) return;
+        if (cur.byIndex.get(cur.currentItem)?.id !== lastTrack.id) return;
+        halt();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueEnded]);
+
   const playItems = useCallback(
     async (items: ResolvableItem[], index: number) => {
       const run = ++runId.current;
@@ -203,6 +328,8 @@ export function usePlayDiscovery() {
           failed: new Set(),
           run,
           busy: new Set(),
+          autoplayed: false,
+          autoplayNotified: false,
         };
       } catch (err) {
         if (run === runId.current) {

@@ -116,10 +116,10 @@ function MenuItem({
   );
 }
 
-/** Options dropdown: add to playlist + share + crossfade. */
+/** Options dropdown: add to playlist + share + crossfade + autoplay. */
 function OptionsMenu({ track }: { track: Track }) {
   const [copied, setCopied] = useState(false);
-  const { crossfade, setCrossfade } = usePlayer();
+  const { crossfade, setCrossfade, autoplay, toggleAutoplay } = usePlayer();
 
   const handleShare = async () => {
     try {
@@ -143,6 +143,27 @@ function OptionsMenu({ track }: { track: Track }) {
         <span className="w-5 text-center">{copied ? "✓" : "↗"}</span>
         {copied ? "Link copied" : "Share"}
       </MenuItem>
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={autoplay}
+        onClick={toggleAutoplay}
+        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-[14px]/[20px] font-medium transition-colors hover:bg-white/5"
+      >
+        <span className={autoplay ? "text-accent" : "text-fg"}>Autoplay</span>
+        <span
+          aria-hidden="true"
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+            autoplay ? "bg-accent" : "bg-white/15"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+              autoplay ? "left-[18px]" : "left-0.5"
+            }`}
+          />
+        </span>
+      </button>
       <div className="mt-1 border-t border-border px-3 py-2.5">
         <div className="flex items-center justify-between">
           <span className="text-[12px]/[16px] font-semibold text-fg">
