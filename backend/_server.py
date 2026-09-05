@@ -36,6 +36,7 @@ from fastapi.responses import StreamingResponse
 
 from customisedLogs import CustomisedLogs
 
+from Classes.Holders.FileInvolved import Folders
 from Classes.Processors.DBHolder import DBHolder
 from Classes.Processors.URLHandler import URLHandler
 from Classes.Processors.SongProcessor import SongCache
@@ -50,8 +51,15 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
-
 Logger = CustomisedLogs()
+
+# Runtime-writable folders (git-ignored, may not exist on fresh deploys).
+for _folder in (Folders.temp, Folders.autoTemp):
+    try:
+        _folder.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        Logger.log(Logger.Colors.yellow_500, "startup", f"could not create {_folder}: {exc}")
+
 SQLConn = DBHolder(Logger)
 URLHandler = URLHandler()
 SongCache = SongCache(SQLConn.useDB(), Logger, URLHandler)
@@ -60,10 +68,16 @@ Curator = MixCurator(Logger)
 
 # Direct axios access from the frontend dev server (no Vite proxy).
 # Browsers enforce CORS on cross-origin XHR, so the API must allow the
-# web origins explicitly. Permissive in dev; tighten allow_origins in prod.
+# web origins explicitly. Comma-separated ALLOWED_ORIGINS in production
+# (e.g. your Vercel URL); permissive "*" default keeps local dev working.
+_allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    if origin.strip()
+] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
