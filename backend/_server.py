@@ -1,6 +1,24 @@
 import os
 import sys
 
+try:
+    import typing.io  # noqa: F401
+except ImportError:
+    # Python 3.13 removed the deprecated typing.io submodule, but older
+    # releases of some dependencies (e.g. colr<0.9.1 via customisedLogs)
+    # still do `from typing.io import IO`. Re-create the alias from
+    # typing.IO/TextIO/BinaryIO, which still exist. No-op on versions
+    # where typing.io is present, so this is safe however deps resolve.
+    import types as _types
+    import typing as _typing
+
+    _typing_io_alias = _types.ModuleType("typing.io")
+    _typing_io_alias.IO = _typing.IO
+    _typing_io_alias.TextIO = _typing.TextIO
+    _typing_io_alias.BinaryIO = _typing.BinaryIO
+    sys.modules["typing.io"] = _typing_io_alias
+    del _typing_io_alias
+
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
