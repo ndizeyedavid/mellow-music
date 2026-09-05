@@ -3,7 +3,6 @@ import {
   type ApiDiscoveryItem,
 } from "../api/music";
 import type { Track } from "../types";
-
 /**
  * User playlist model (v2). Snapshot-based: each saved track stores its
  * playable AUDIO_URL as-is plus expiry metadata. Playback uses the snapshot
@@ -42,6 +41,20 @@ export interface NewSavedTrack {
   duration: number;
   audioUrl: string;
   expiresAt: string | null;
+}
+
+/** Build a save-ready snapshot from a fully-resolved Track. */
+export function resolvedToSnapshot(track: Track): NewSavedTrack {
+  return {
+    trackId: track.id,
+    title: track.title,
+    artist: track.artist,
+    thumbnail: track.image,
+    backdrop: track.backdrop ?? null,
+    duration: track.duration,
+    audioUrl: track.source,
+    expiresAt: track.expiresAt ?? null,
+  };
 }
 
 /** Cover = first track art, else empty (SafeImage renders a placeholder). */

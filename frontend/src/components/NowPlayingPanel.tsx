@@ -64,7 +64,13 @@ export function NowPlayingPanelContent({ onArtwork }: { onArtwork: () => void })
               type="button"
               aria-label={liked ? "Remove from liked" : "Add to liked"}
               aria-pressed={liked}
-              onClick={() => toggleLikeSong(currentTrack.id, currentTrack.title)}
+              onClick={() =>
+                toggleLikeSong(
+                  currentTrack.id,
+                  currentTrack.title,
+                  currentTrack.artist,
+                )
+              }
               className={`cursor-pointer rounded-full p-1.5 transition-colors hover:text-accent ${
                 liked ? "text-accent" : "text-fg"
               }`}

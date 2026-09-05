@@ -227,28 +227,46 @@ export interface MixResponse {
  * GET /api/mix — taste-driven mix. Artists/exclude come from buildTaste().
  * Empty taste returns chart fallback (cold start, no LLM spend).
  * fresh=true forces full re-curation past the backend cache.
+ *
+ * Concurrent identical requests share one in-flight promise, so remounts
+ * and overlapping callers never trigger duplicate curator runs.
  */
+const mixInflight = new Map<string, Promise<MixResponse>>();
+
 export async function getMix(
   artists: string[],
   exclude: string[],
   limit = 12,
   fresh = false,
+  genres: string[] = [],
 ): Promise<MixResponse> {
-  const { data } = await api.get<MixResponse>("/api/mix", {
-    params: {
-      artists: artists.join(","),
-      exclude: exclude.join(","),
-      limit,
-      ...(fresh ? { fresh: true } : {}),
-    },
-  });
-  return {
-    mix_id: data.mix_id ?? "",
-    name: data.name ?? "My Mix",
-    blurb: data.blurb ?? "",
-    tracks: data.tracks ?? [],
-    curated: data.curated ?? false,
-  };
+  const key = `${artists.join("|")}::${genres.join("|")}::${exclude.join("|")}::${limit}::${fresh}`;
+  const inflight = mixInflight.get(key);
+  if (inflight) return inflight;
+  const request = (async (): Promise<MixResponse> => {
+    const { data } = await api.get<MixResponse>("/api/mix", {
+      params: {
+        artists: artists.join(","),
+        genres: genres.join(","),
+        exclude: exclude.join(","),
+        limit,
+        ...(fresh ? { fresh: true } : {}),
+      },
+    });
+    return {
+      mix_id: data.mix_id ?? "",
+      name: data.name ?? "My Mix",
+      blurb: data.blurb ?? "",
+      tracks: data.tracks ?? [],
+      curated: data.curated ?? false,
+    };
+  })();
+  mixInflight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    mixInflight.delete(key);
+  }
 }
 
 /**

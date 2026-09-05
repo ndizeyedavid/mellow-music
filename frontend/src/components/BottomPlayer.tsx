@@ -431,7 +431,13 @@ export function BottomPlayer({
             <ControlButton
               label="Like"
               active={liked}
-              onClick={() => toggleLikeSong(currentTrack.id, currentTrack.title)}
+              onClick={() =>
+                toggleLikeSong(
+                  currentTrack.id,
+                  currentTrack.title,
+                  currentTrack.artist,
+                )
+              }
             >
               {liked ? (
                 <MdFavorite size={16} />

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { MdPlayArrow, MdRefresh } from "react-icons/md";
+import toast from "react-hot-toast";
+import { MdBookmarkAdd, MdPlayArrow, MdRefresh } from "react-icons/md";
 import { ApiTrackList } from "../components/ApiTrackList";
 import { SafeImage } from "../components/SafeImage";
 import { EmptyState } from "../components/EmptyState";
@@ -10,7 +11,8 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { usePlayDiscovery } from "../hooks/usePlayDiscovery";
 import { useHistory } from "../utils/history";
 import { buildTaste, tasteSignature } from "../utils/taste";
-import { getMix, type MixResponse } from "../api/music";
+import { getMix, resolveDiscoveryItem, type MixResponse } from "../api/music";
+import { resolvedToSnapshot } from "../utils/playlists";
 import { formatTime } from "../utils/format";
 
 /**
@@ -46,8 +48,11 @@ function MixBody({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [saving, setSaving] = useState(0);
+  const [savedId, setSavedId] = useState<string | null>(null);
   useDocumentTitle(mix?.name ?? "My Mix");
   const { currentTrack, isPlaying } = usePlayer();
+  const { createPlaylist, addTrack } = usePlaylists();
   const { playItems, isResolving, resolvingKey, playError, clearPlayError } =
     usePlayDiscovery();
 
@@ -78,6 +83,52 @@ function MixBody({
     (sum, t) => sum + (typeof t.duration === "number" ? t.duration : 0),
     0,
   );
+
+  /** Save the whole generated mix as a user playlist (with progress). */
+  const saveMix = async () => {
+    if (!mix || saving > 0) return;
+    const playlist = createPlaylist({
+      name: mix.name,
+      description: mix.blurb || "Saved mix",
+    });
+    setSavedId(playlist.id);
+    let done = 0;
+    let failed = 0;
+    for (const item of tracks) {
+      try {
+        const resolved = await resolveDiscoveryItem(item);
+        addTrack(playlist.id, resolvedToSnapshot(resolved));
+      } catch {
+        failed += 1;
+      }
+      done += 1;
+      setSaving(done);
+    }
+    setSaving(0);
+    if (done - failed > 0) {
+      toast.success(
+        (t) => (
+          <span className="flex items-center gap-3">
+            <span className="font-medium">
+              Saved {done - failed} song{done - failed === 1 ? "" : "s"} to{" "}
+              {mix.name}
+              {failed > 0 ? ` (${failed} skipped)` : ""}
+            </span>
+            <Link
+              to={`/playlist/${playlist.id}`}
+              onClick={() => toast.dismiss(t.id)}
+              className="shrink-0 rounded-full bg-white px-3 py-1 text-[12px] font-bold text-black transition-transform hover:scale-105"
+            >
+              View
+            </Link>
+          </span>
+        ),
+        { id: `mix-saved-${playlist.id}` },
+      );
+    } else {
+      toast.error("Couldn't save this mix — nothing resolved.");
+    }
+  };
 
   if (loading) {
     return (
@@ -165,6 +216,7 @@ function MixBody({
             setLoading(true);
             setError(null);
             setMix(null);
+            setSavedId(null);
             setNonce((n) => n + 1);
           }}
           disabled={resolvingKey !== null}
@@ -172,6 +224,24 @@ function MixBody({
         >
           <MdRefresh size={18} /> Refresh mix
         </button>
+        {savedId ? (
+          <Link
+            to={`/playlist/${savedId}`}
+            className="flex items-center gap-1.5 rounded-full border border-accent/50 bg-accent/10 px-5 py-3 text-[14px]/[20px] font-semibold text-accent transition-colors hover:bg-accent/20"
+          >
+            <MdBookmarkAdd size={18} /> View saved playlist
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void saveMix()}
+            disabled={saving > 0 || resolvingKey !== null}
+            className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-elevated px-5 py-3 text-[14px]/[20px] font-semibold text-fg transition-colors hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+          >
+            <MdBookmarkAdd size={18} />{" "}
+            {saving > 0 ? `Saving ${saving}/${tracks.length}…` : "Save mix"}
+          </button>
+        )}
       </div>
 
       {playError && (
