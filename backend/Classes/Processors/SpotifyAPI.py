@@ -1,4 +1,4 @@
-from pooledMySQL import PooledMySQL
+from Classes.Processors.MySQLPool import MySQLPool
 from rateLimitedQueues import RateLimitedQueues
 from spotipy import Spotify, SpotifyClientCredentials, CacheFileHandler
 from itertools import cycle
@@ -18,7 +18,7 @@ class SpotifyAPICollection:
     """
     Holds all Spotify APIS
     """
-    def __init__(self, SQLConn:PooledMySQL):
+    def __init__(self, SQLConn:MySQLPool):
         self.__apis:list[SpotifyAPI] = []
         self.apis = cycle(self.__apis)
         for client_creds in SQLConn.execute(f"SELECT {DBTables.SPOTIFY_APIS.CLIENT_ID}, {DBTables.SPOTIFY_APIS.SECRET} from {DBTables.SPOTIFY_APIS.TABLE_NAME}"):

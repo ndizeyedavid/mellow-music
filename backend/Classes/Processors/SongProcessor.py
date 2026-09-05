@@ -5,7 +5,7 @@ from time import sleep
 
 
 from customisedLogs import CustomisedLogs
-from pooledMySQL import PooledMySQL
+from Classes.Processors.MySQLPool import MySQLPool
 from randomisedString import RandomisedString
 
 
@@ -21,7 +21,7 @@ class SongCache:
     """
     Processor to collect, renew and handle local and DB caches for all song data
     """
-    def __init__(self, SQLConn:PooledMySQL, Logger:CustomisedLogs, URLHandler:URLHandler):
+    def __init__(self, SQLConn:MySQLPool, Logger:CustomisedLogs, URLHandler:URLHandler):
         self.SQLConn = SQLConn
         self.logger = Logger
         self.cache:dict[str, SongData] = {}
