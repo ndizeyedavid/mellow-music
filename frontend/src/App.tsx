@@ -62,7 +62,7 @@ const NotFoundPage = lazyPage(
 );
 
 function AppShell() {
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [navOpen, setNavOpen] = useState(false);
   const [fullOpen, setFullOpen] = useState(false);
   const [artOpen, setArtOpen] = useState(false);
@@ -129,10 +129,7 @@ function AppShell() {
 
       {/* Desktop inline panel */}
       <div className="hidden shrink-0 md:block">
-        <NowPlayingPanel
-          open={panelOpen}
-          onArtwork={() => setArtOpen(true)}
-        />
+        <NowPlayingPanel open={panelOpen} onArtwork={() => setArtOpen(true)} />
       </div>
 
       {/* Mobile panel overlay */}

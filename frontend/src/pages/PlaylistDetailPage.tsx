@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import toast from "react-hot-toast";
 import {
   MdArrowDownward,
   MdArrowUpward,
+  MdBookmarkAdd,
   MdClose,
   MdDeleteOutline,
   MdEdit,
@@ -13,7 +15,7 @@ import { SafeImage } from "../components/SafeImage";
 import { EmptyState } from "../components/EmptyState";
 import { PlaylistForm } from "../components/PlaylistForm";
 import { usePlayer } from "../context/PlayerContext";
-import { playlistCover } from "../utils/playlists";
+import { playlistCover, resolvedToSnapshot } from "../utils/playlists";
 import { QueueMenuButton } from "../components/QueueMenu";
 import { resolveSavedTrack } from "../utils/playlists";
 import { usePlaylists } from "../context/PlaylistContext";
@@ -21,6 +23,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { usePlayDiscovery, type ResolvableItem } from "../hooks/usePlayDiscovery";
 import {
   getPlaylist,
+  resolveDiscoveryItem,
   type ApiDiscoveryItem,
   type ApiPlaylist,
 } from "../api/music";
@@ -45,9 +48,12 @@ function ApiPlaylistDetail({ id }: { id: string }) {
   const [tracks, setTracks] = useState<ApiDiscoveryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(0);
+  const [savedId, setSavedId] = useState<string | null>(null);
   useDocumentTitle(playlist?.title);
   const { currentTrack, isPlaying } = usePlayer();
   const { playItems, isResolving, resolvingKey } = usePlayDiscovery();
+  const { createPlaylist, addTrack } = usePlaylists();
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +110,54 @@ function ApiPlaylistDetail({ id }: { id: string }) {
     0,
   );
 
+  /** Save this curated playlist as an owned user playlist (with progress). */
+  const savePlaylist = async () => {
+    if (!playlist || saving > 0) return;
+    const owned = createPlaylist({
+      name: playlist.title,
+      description: playlist.creator
+        ? `Saved from ${playlist.creator}'s playlist`
+        : "Saved playlist",
+    });
+    setSavedId(owned.id);
+    let done = 0;
+    let failed = 0;
+    for (const item of tracks) {
+      try {
+        const resolved = await resolveDiscoveryItem(item);
+        addTrack(owned.id, resolvedToSnapshot(resolved));
+      } catch {
+        failed += 1;
+      }
+      done += 1;
+      setSaving(done);
+    }
+    setSaving(0);
+    if (done - failed > 0) {
+      toast.success(
+        (t) => (
+          <span className="flex items-center gap-3">
+            <span className="font-medium">
+              Saved {done - failed} song{done - failed === 1 ? "" : "s"} to{" "}
+              {playlist.title}
+              {failed > 0 ? ` (${failed} skipped)` : ""}
+            </span>
+            <Link
+              to={`/playlist/${owned.id}`}
+              onClick={() => toast.dismiss(t.id)}
+              className="shrink-0 rounded-full bg-white px-3 py-1 text-[12px] font-bold text-black transition-transform hover:scale-105"
+            >
+              View
+            </Link>
+          </span>
+        ),
+        { id: `playlist-saved-${owned.id}` },
+      );
+    } else {
+      toast.error("Couldn't save this playlist — nothing resolved.");
+    }
+  };
+
   return (
     <div className="px-6 pt-6">
       <div className="flex flex-col gap-6 md:flex-row md:items-end">
@@ -140,6 +194,24 @@ function ApiPlaylistDetail({ id }: { id: string }) {
         >
           <MdPlayArrow size={20} /> Play
         </button>
+        {savedId ? (
+          <Link
+            to={`/playlist/${savedId}`}
+            className="flex items-center gap-1.5 rounded-full border border-accent/50 bg-accent/10 px-5 py-3 text-[14px]/[20px] font-semibold text-accent transition-colors hover:bg-accent/20"
+          >
+            <MdBookmarkAdd size={18} /> View saved playlist
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void savePlaylist()}
+            disabled={saving > 0 || resolvingKey !== null}
+            className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-elevated px-5 py-3 text-[14px]/[20px] font-semibold text-fg transition-colors hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+          >
+            <MdBookmarkAdd size={18} />{" "}
+            {saving > 0 ? `Saving ${saving}/${tracks.length}…` : "Save playlist"}
+          </button>
+        )}
       </div>
 
       <ApiTrackList
