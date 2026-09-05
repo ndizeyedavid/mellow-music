@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { resolveDiscoveryItem, type ApiDiscoveryItem } from "../api/music";
 import type { Track } from "../types";
 import { usePersistentState } from "../utils/usePersistentState";
 
@@ -39,6 +40,25 @@ export interface AudioPlayerOptions {
    * per track source.
    */
   refreshTrack?: (track: Track) => Promise<Track | null>;
+  /**
+   * Called when the queue is exhausted with autoplay on. Return the grown
+   * queue plus follow-up candidates, or null to stop. Runs once per end.
+   */
+  onQueueExhausted?: (
+    queue: Track[],
+    index: number,
+  ) => Promise<{
+    tracks: Track[];
+    startIndex: number;
+    rest: ApiDiscoveryItem[];
+  } | null>;
+  /** Fired when a track plays through to the end (repeat-one loops count). */
+  onTrackEnded?: (track: Track) => void;
+  /**
+   * Fired when the listener abandons a track early (<25% played, tracks
+   * over 45s). Powers negative affinity; never fires for paused audio.
+   */
+  onTrackSkipped?: (track: Track, fraction: number) => void;
 }
 
 export interface UseAudioPlayer {
@@ -58,6 +78,8 @@ export interface UseAudioPlayer {
   shuffle: boolean;
   /** Crossfade length in seconds (0 = off). Persisted. */
   crossfade: number;
+  /** Autoplay: keep going with mix tracks when the queue ends. Persisted. */
+  autoplay: boolean;
   progress: number;
   streamError: string | null;
   togglePlay: () => void;
@@ -82,6 +104,7 @@ export interface UseAudioPlayer {
   toggleShuffle: () => void;
   setCrossfade: (seconds: number) => void;
   restart: () => void;
+  toggleAutoplay: () => void;
   clearStreamError: () => void;
 }
 
@@ -159,6 +182,10 @@ export function useAudioPlayer(
     "mellow-crossfade",
     5,
   );
+  const [autoplay, setAutoplayState] = usePersistentState(
+    "mellow-autoplay",
+    true,
+  );
   const [streamError, setStreamError] = useState<string | null>(null);
 
   // Refs mirroring state so the one-time audio listeners always read fresh values.
@@ -209,12 +236,28 @@ export function useAudioPlayer(
   useEffect(() => {
     crossfadeRef.current = crossfade;
   }, [crossfade]);
+  const autoplayRef = useRef(autoplay);
+  useEffect(() => {
+    autoplayRef.current = autoplay;
+  }, [autoplay]);
   useEffect(() => {
     tracksRef.current = tracks;
   }, [tracks]);
   useEffect(() => {
     refreshRef.current = options.refreshTrack;
   }, [options.refreshTrack]);
+  const queueExhaustedRef = useRef(options.onQueueExhausted);
+  useEffect(() => {
+    queueExhaustedRef.current = options.onQueueExhausted;
+  }, [options.onQueueExhausted]);
+  const trackEndedRef = useRef(options.onTrackEnded);
+  useEffect(() => {
+    trackEndedRef.current = options.onTrackEnded;
+  }, [options.onTrackEnded]);
+  const trackSkippedRef = useRef(options.onTrackSkipped);
+  useEffect(() => {
+    trackSkippedRef.current = options.onTrackSkipped;
+  }, [options.onTrackSkipped]);
 
   // One-shot resume into the restored position (set when metadata lands).
   const resumeRef = useRef<{ index: number; position: number } | null>(
@@ -426,17 +469,29 @@ export function useAudioPlayer(
     const length = tracksRef.current.length;
     if (length === 0) return null;
     if (repeatRef.current === "one") return indexRef.current;
-    if (
-      shuffleRef.current ||
-      repeatRef.current === "all" ||
-      indexRef.current < length - 1
-    ) {
-      return shuffleRef.current
-        ? pickIndex(indexRef.current)
-        : (indexRef.current + 1) % length;
+    if (shuffleRef.current) return pickIndex(indexRef.current);
+    if (indexRef.current < length - 1) return indexRef.current + 1;
+    // Last track with repeat-all: autoplay (when on) continues past the end
+    // with fresh tracks instead of looping the same queue forever.
+    if (repeatRef.current === "all") {
+      return autoplayRef.current ? null : 0;
     }
     return null;
   }, [pickIndex]);
+
+  /** Record an early abandon of the current track (guards included). */
+  const noteSkip = useCallback((): void => {
+    if (!isPlayingRef.current) return;
+    const track = tracksRef.current[indexRef.current];
+    if (!track?.source) return;
+    const el = frontEl();
+    if (!el || !el.src) return;
+    const total = el.duration || track.duration || 0;
+    if (!Number.isFinite(total) || total < 45) return;
+    const fraction = Math.max(0, el.currentTime / total);
+    if (fraction >= 0.25) return;
+    trackSkippedRef.current?.(track, fraction);
+  }, [frontEl]);
 
   /** Manual switches request a short fade; auto-advance sets remaining time. */
   const requestManualFade = useCallback((): void => {
@@ -447,21 +502,23 @@ export function useAudioPlayer(
 
   const goNext = useCallback(() => {
     if (tracksRef.current.length === 0) return;
+    noteSkip();
     requestManualFade();
     setIndex((prev) =>
       shuffleRef.current ? pickIndex(prev) : (prev + 1) % tracksRef.current.length,
     );
-  }, [pickIndex, requestManualFade]);
+  }, [pickIndex, requestManualFade, noteSkip]);
 
   const goPrevious = useCallback(() => {
     if (tracksRef.current.length === 0) return;
+    noteSkip();
     requestManualFade();
     setIndex((prev) =>
       shuffleRef.current
         ? pickIndex(prev)
         : (prev - 1 + tracksRef.current.length) % tracksRef.current.length,
     );
-  }, [pickIndex, requestManualFade]);
+  }, [pickIndex, requestManualFade, noteSkip]);
 
   /** Jump to a specific track and start playing it. */
   const playFrom = useCallback(
@@ -474,10 +531,11 @@ export function useAudioPlayer(
         void frontEl()?.play();
         return;
       }
+      noteSkip();
       requestManualFade();
       setIndex(target);
     },
-    [frontEl, requestManualFade],
+    [frontEl, requestManualFade, noteSkip],
   );
 
   /** Replace the whole queue and start playing the track at startIndex. */
@@ -485,12 +543,17 @@ export function useAudioPlayer(
     (nextTracks: Track[], nextIndex = 0) => {
       if (nextTracks.length === 0) return;
       const target = Math.max(0, Math.min(nextIndex, nextTracks.length - 1));
+      const outgoing = tracksRef.current[indexRef.current];
+      const incoming = nextTracks[target];
+      if (outgoing && incoming && outgoing.id !== incoming.id) {
+        noteSkip();
+      }
       isPlayingRef.current = true;
       requestManualFade();
       setTracks(nextTracks);
       setIndex(target);
     },
-    [requestManualFade],
+    [requestManualFade, noteSkip],
   );
 
   /** Insert tracks without disturbing playback (never autoplays). */
@@ -599,6 +662,9 @@ export function useAudioPlayer(
           if (remaining <= fadeLength && remaining > 0) {
             const nxt = computeNextIndex();
             if (nxt !== null && nxt !== indexRef.current) {
+              // Listened essentially through — counts as a completion.
+              const finished = tracksRef.current[indexRef.current];
+              if (finished) trackEndedRef.current?.(finished);
               fadePendingRef.current = remaining;
               setIndex(nxt);
             }
@@ -643,6 +709,8 @@ export function useAudioPlayer(
           finishFade();
           return;
         }
+        const finished = tracksRef.current[indexRef.current];
+        if (finished) trackEndedRef.current?.(finished);
         if (repeatRef.current === "one") {
           audio.currentTime = 0;
           currentTimeRef.current = 0;
@@ -652,6 +720,52 @@ export function useAudioPlayer(
         const nxt = computeNextIndex();
         if (nxt !== null) {
           setIndex(nxt);
+        } else if (autoplayRef.current && tracksRef.current.length > 0) {
+          // Queue exhausted with autoplay on: grow it centrally with mix
+          // tracks instead of stopping. Staleness (user acted meanwhile)
+          // aborts the takeover back to a clean stop.
+          const takeOver = queueExhaustedRef.current;
+          if (!takeOver) {
+            setIsPlaying(false);
+            setCurrentTime(0);
+            currentTimeRef.current = 0;
+            return;
+          }
+          const snapQueue = tracksRef.current;
+          const snapIndex = indexRef.current;
+          setIsBuffering(true);
+          void takeOver(snapQueue, snapIndex).then(async (result) => {
+            const stale =
+              indexRef.current !== snapIndex ||
+              tracksRef.current !== snapQueue;
+            if (!result || stale || !autoplayRef.current) {
+              setIsBuffering(false);
+              // User took over meanwhile: leave their state alone.
+              // Failed or disabled autoplay: clean stop.
+              if (stale) return;
+              setIsPlaying(false);
+              setCurrentTime(0);
+              currentTimeRef.current = 0;
+              return;
+            }
+            replaceQueue(result.tracks, result.startIndex);
+            // Fill the rest behind the urgent first track; stop appending
+            // once our take no longer owns the tail.
+            const firstId = result.tracks[result.startIndex]?.id;
+            for (const item of result.rest) {
+              try {
+                const track = await resolveDiscoveryItem(item);
+                if (
+                  !tracksRef.current.some((t) => t.id === firstId)
+                ) {
+                  break;
+                }
+                queueLast(track);
+              } catch {
+                // Skip unresolvable items; the queue plays on regardless.
+              }
+            }
+          });
         } else {
           setIsPlaying(false);
           setCurrentTime(0);
@@ -701,7 +815,7 @@ export function useAudioPlayer(
     return () => {
       cleanups.forEach((fn) => fn());
     };
-  }, [goNext, computeNextIndex, attemptRefresh, frontEl, finishFade, persistNow]);
+  }, [goNext, computeNextIndex, attemptRefresh, frontEl, finishFade, persistNow, replaceQueue, queueLast]);
 
   // Load the track when the index changes. When the front voice is audibly
   // playing something else, overlap into the new track (crossfade) instead
@@ -934,6 +1048,10 @@ export function useAudioPlayer(
     [],
   );
   const toggleShuffle = useCallback(() => setShuffle((on) => !on), []);
+  const toggleAutoplay = useCallback(
+    () => setAutoplayState((on) => !on),
+    [setAutoplayState],
+  );
   const setCrossfade = useCallback(
     (seconds: number) => {
       setCrossfadeState(Math.min(12, Math.max(0, seconds)));
@@ -974,6 +1092,7 @@ export function useAudioPlayer(
     repeat,
     shuffle,
     crossfade,
+    autoplay,
     progress,
     streamError,
     togglePlay,
@@ -990,9 +1109,10 @@ export function useAudioPlayer(
     setVolumeValue,
     toggleMute,
     cycleRepeat,
-  toggleShuffle,
-  setCrossfade,
-  restart,
-  clearStreamError,
+    toggleShuffle,
+    setCrossfade,
+    restart,
+    toggleAutoplay,
+    clearStreamError,
   };
 }

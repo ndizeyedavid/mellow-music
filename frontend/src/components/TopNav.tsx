@@ -3,10 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { MdMenu } from "react-icons/md";
 import { Icon } from "./Icon";
 import { SearchProviderPicker } from "./SearchProviderPicker";
-import {
-  providerMeta,
-  useSearchProvider,
-} from "../utils/searchProvider";
+import { providerMeta, useSearchProvider } from "../utils/searchProvider";
 import { GoSidebarCollapse } from "react-icons/go";
 
 /** Round navigation/icon button used in the top bar. */
@@ -110,7 +107,7 @@ export function TopNav({ panelOpen, onTogglePanel, onToggleNav }: TopNavProps) {
         onSubmit={submitSearch}
         className="relative mx-auto flex h-10 w-[389px] max-w-full items-center gap-2.5 rounded-xl border border-border bg-elevated px-2.5 focus-within:border-accent/50"
       >
-        <Icon name="search" size={16} />
+        <Icon name="search" size={24} />
         <input
           value={draft}
           onChange={(event) => updateSearch(event.target.value)}

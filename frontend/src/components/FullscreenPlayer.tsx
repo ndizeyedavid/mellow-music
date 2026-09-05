@@ -218,7 +218,13 @@ export function FullscreenPlayer({ onClose }: { onClose: () => void }) {
             type="button"
             aria-label={liked ? "Remove from liked" : "Add to liked"}
             aria-pressed={liked}
-            onClick={() => toggleLikeSong(currentTrack.id, currentTrack.title)}
+            onClick={() =>
+              toggleLikeSong(
+                currentTrack.id,
+                currentTrack.title,
+                currentTrack.artist,
+              )
+            }
             className={`cursor-pointer transition-all hover:scale-110 active:scale-90 ${
               liked ? "text-accent" : "text-white/70 hover:text-white"
             }`}

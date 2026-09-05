@@ -5,6 +5,31 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+
+def _load_env_file(path: str) -> None:
+    """
+    Minimal .env loader (no third-party dependency): KEY=VALUE lines with
+    # comments and optional quotes. Shell exports always win — values are
+    # only filled in when missing, so this is restart-safe and side-effect
+    free for already-configured environments.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+_load_env_file(os.path.join(os.path.dirname(BACKEND_DIR), ".env"))
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -14,6 +39,7 @@ from customisedLogs import CustomisedLogs
 from Classes.Processors.DBHolder import DBHolder
 from Classes.Processors.URLHandler import URLHandler
 from Classes.Processors.SongProcessor import SongCache
+from Classes.Processors.MixCurator import MixCurator
 from Hidden.Secrets import CoreValues
 
 
@@ -29,6 +55,7 @@ Logger = CustomisedLogs()
 SQLConn = DBHolder(Logger)
 URLHandler = URLHandler()
 SongCache = SongCache(SQLConn.useDB(), Logger, URLHandler)
+Curator = MixCurator(Logger)
 
 
 # Direct axios access from the frontend dev server (no Vite proxy).
@@ -158,6 +185,75 @@ def _playlistAPI(playlist_id: str) -> dict:
     if details is None:
         return {"ERROR": "Playlist not found"}
     return details
+
+
+@app.get("/api/mix")
+def _mixAPI(
+    artists: str = Query("", description="Comma-separated artist names from user taste"),
+    genres: str = Query("", description="Comma-separated genre names from user taste"),
+    exclude: str = Query("", description="Comma-separated titles the user already knows"),
+    limit: int = Query(12, ge=1, le=20),
+    fresh: bool = Query(False, description="Bypass caches for a full re-curation"),
+) -> dict:
+    """
+    Taste-driven mix. Deterministic candidate pool for now; the Groq
+    curator upgrade adds ordering, reasons, naming (curated=True).
+    Empty taste falls back to charts (cold start, no LLM spend).
+    """
+    import hashlib
+    names = [a.strip() for a in artists.split(",") if a.strip()][:5]
+    genre_list = [g.strip() for g in genres.split(",") if g.strip()][:3]
+    excluded = [e.strip() for e in exclude.split(",") if e.strip()]
+    if not names and not genre_list:
+        charts = SongCache.YTDLP.charts(limit=limit)
+        tracks = charts.get("tracks", [])[:limit]
+        return {
+            "mix_id": "charts",
+            "name": "Fresh Mix",
+            "blurb": "Trending tracks to get you started.",
+            "tracks": [{**t, "reason": ""} for t in tracks],
+            "curated": False,
+        }
+    tracks = SongCache.YTDLP.mix_candidates(
+        artist_names=names, genres=genre_list, exclude_titles=excluded, limit=limit,
+        fresh=fresh,
+    )
+    # Stable signature: taste only, NOT the ever-growing exclude list, so
+    # repeat tastes (e.g. autoplay continuations) hit the cache instead of
+    # burning a fresh Groq call every time.
+    sig = hashlib.md5(f"{'|'.join(names)}::{'|'.join(genre_list)}::{limit}".encode()).hexdigest()
+    excluded_lower = {e.lower() for e in excluded}
+    # Full curator upgrade when a key is configured; otherwise deterministic.
+    if Curator.available() and tracks:
+        if not fresh:
+            cached = Curator.peek(sig)
+            if cached:
+                survivors = [t for t in cached.get("tracks", []) if t.get("title", "").lower() not in excluded_lower]
+                if len(survivors) >= min(3, limit):
+                    return {
+                        "mix_id": sig,
+                        "name": cached.get("name", ""),
+                        "blurb": cached.get("blurb", ""),
+                        "tracks": survivors[:limit],
+                        "curated": True,
+                    }
+        curated = Curator.curate_cached(sig, names, tracks, limit=limit, fresh=fresh)
+        if curated:
+            return {
+                "mix_id": sig,
+                "name": curated["name"],
+                "blurb": curated["blurb"],
+                "tracks": curated["tracks"],
+                "curated": True,
+            }
+    seed = names[0] if names else genre_list[0]
+    return {
+        "mix_id": sig,
+        "name": f"Mix inspired by {seed}",
+        "blurb": "Picked from artists and genres you listen to.",
+        "tracks": [{**t, "reason": ""} for t in tracks],
+        "curated": False,
+    }
 
 
 @app.get("/api/search")

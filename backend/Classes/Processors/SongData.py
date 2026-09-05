@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from threading import Condition
+from threading import Condition, Lock, Thread
 from typing import Generator
 
 import requests
@@ -32,6 +32,10 @@ class SongData:
         self.data_queue = []
         self.done = False
         self.data_condition = Condition()
+        # Audio bytes are fetched LAZILY on first stream read — resolving
+        # metadata must never download audio for songs nobody plays.
+        self._stream_started = False
+        self._stream_lock = Lock()
 
 
     def full_dict(self) -> dict:
@@ -70,20 +74,34 @@ class SongData:
         return self
 
 
+    def ensure_stream(self) -> None:
+        """
+        Start the background audio download exactly once, on first actual
+        stream consumption. Thread-safe: concurrent readers share one fetch.
+        """
+        with self._stream_lock:
+            if self._stream_started:
+                return
+            self._stream_started = True
+        Thread(target=self.fetch_stream, daemon=True).start()
+
     def fetch_stream(self) -> None:
         """
         Start reading bytes from URL as stream once Song.audio_url is received
         :return:
         """
-        self.stream = requests.get(self.audio_url, stream=True).iter_content(1024) # Chunks of 1KB is read and stored
-        for chunk in self.stream:
+        try:
+            self.stream = requests.get(self.audio_url, stream=True).iter_content(1024) # Chunks of 1KB is read and stored
+            for chunk in self.stream:
+                with self.data_condition:
+                    self.data_queue.append(chunk)
+                    self.data_condition.notify_all()
+        except Exception:
+            pass
+        finally:
             with self.data_condition:
-                self.data_queue.append(chunk)
+                self.done = True
                 self.data_condition.notify_all()
-
-        with self.data_condition:
-            self.done = True
-            self.data_condition.notify_all()
 
 
     def __get_cached_chunk(self, index:int):
@@ -106,6 +124,7 @@ class SongData:
         Generator for reading bytes from stream or as a whole if the song is ready
         :return: Generator[bytes]
         """
+        self.ensure_stream()
         expected = 0
         while True:
             with self.data_condition:

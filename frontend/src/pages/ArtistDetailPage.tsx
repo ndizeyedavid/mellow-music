@@ -130,7 +130,7 @@ function ArtistDetail({ id }: { id: string }) {
         <button
           type="button"
           aria-pressed={following}
-          onClick={() => toggleFollowArtist(artist.id)}
+          onClick={() => toggleFollowArtist(artist.id, artist.name)}
           className={`cursor-pointer rounded-full px-6 py-3 text-[14px]/[20px] font-semibold transition-colors ${
             following
               ? "bg-fg text-[#171719] hover:bg-white/80"

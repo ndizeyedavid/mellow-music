@@ -55,13 +55,14 @@ const ArtistDetailPage = lazyPage(
 );
 const SongPage = lazyPage(() => import("./pages/SongPage"), "SongPage");
 const LikedPage = lazyPage(() => import("./pages/LikedPage"), "LikedPage");
+const MixPage = lazyPage(() => import("./pages/MixPage"), "MixPage");
 const NotFoundPage = lazyPage(
   () => import("./pages/NotFoundPage"),
   "NotFoundPage",
 );
 
 function AppShell() {
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [navOpen, setNavOpen] = useState(false);
   const [fullOpen, setFullOpen] = useState(false);
   const [artOpen, setArtOpen] = useState(false);
@@ -119,6 +120,7 @@ function AppShell() {
               <Route path="/artist/:id" element={<ArtistDetailPage />} />
               <Route path="/song/:id" element={<SongPage />} />
               <Route path="/liked" element={<LikedPage />} />
+              <Route path="/mix" element={<MixPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
@@ -127,10 +129,7 @@ function AppShell() {
 
       {/* Desktop inline panel */}
       <div className="hidden shrink-0 md:block">
-        <NowPlayingPanel
-          open={panelOpen}
-          onArtwork={() => setArtOpen(true)}
-        />
+        <NowPlayingPanel open={panelOpen} onArtwork={() => setArtOpen(true)} />
       </div>
 
       {/* Mobile panel overlay */}

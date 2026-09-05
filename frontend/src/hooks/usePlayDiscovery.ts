@@ -195,6 +195,7 @@ export function usePlayDiscovery() {
           restart();
         }
         // Open a session; the watcher effect grows the lookahead window.
+        // Queue-end continuation is owned centrally by the player (autoplay).
         sessionRef.current = {
           items,
           queueIdx: [index],

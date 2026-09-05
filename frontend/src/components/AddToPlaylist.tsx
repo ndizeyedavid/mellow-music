@@ -5,10 +5,12 @@ import { MdAdd, MdCheck, MdClose } from "react-icons/md";
 import { SafeImage } from "./SafeImage";
 import {
   playlistCover,
+  resolvedToSnapshot,
   type NewSavedTrack,
   type UserPlaylist,
 } from "../utils/playlists";
 import { usePlaylists } from "../context/PlaylistContext";
+import { recordAffPlaylistAdd } from "../utils/affinity";
 import { resolveDiscoveryItem, type ApiDiscoveryItem } from "../api/music";
 import type { Track } from "../types";
 
@@ -150,6 +152,7 @@ function AddShell({
       const added = addTrack(playlist.id, snapshot);
       setOpen(false);
       if (added) {
+        recordAffPlaylistAdd(snapshot.title, snapshot.artist);
         setDone(true);
         window.setTimeout(() => setDone(false), 1600);
         toast.success(
@@ -237,16 +240,7 @@ export function AddTrackButton({ track }: { track: Track }) {
   return (
     <AddShell
       label={track.title}
-      resolve={async () => ({
-        trackId: track.id,
-        title: track.title,
-        artist: track.artist,
-        thumbnail: track.image,
-        backdrop: track.backdrop ?? null,
-        duration: track.duration,
-        audioUrl: track.source,
-        expiresAt: track.expiresAt ?? null,
-      })}
+      resolve={async () => resolvedToSnapshot(track)}
     />
   );
 }
@@ -266,16 +260,7 @@ export function AddDiscoveryButton({
       label={title}
       resolve={async () => {
         const resolved = await resolveDiscoveryItem(items[index]);
-        return {
-          trackId: resolved.id,
-          title: resolved.title,
-          artist: resolved.artist,
-          thumbnail: resolved.image,
-          backdrop: resolved.backdrop ?? null,
-          duration: resolved.duration,
-          audioUrl: resolved.source,
-          expiresAt: resolved.expiresAt ?? null,
-        };
+        return resolvedToSnapshot(resolved);
       }}
     />
   );

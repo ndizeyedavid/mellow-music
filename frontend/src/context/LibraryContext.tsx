@@ -7,6 +7,11 @@ import {
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { usePersistentState } from "../utils/usePersistentState";
+import {
+  recordAffFollow,
+  recordAffLike,
+  recordAffSave,
+} from "../utils/affinity";
 
 interface LibraryContextValue {
   likedSongs: string[];
@@ -15,9 +20,9 @@ interface LibraryContextValue {
   isSongLiked: (id: string) => boolean;
   isArtistFollowed: (id: string) => boolean;
   isAlbumSaved: (id: string) => boolean;
-  toggleLikeSong: (id: string, title?: string) => void;
-  toggleFollowArtist: (id: string) => void;
-  toggleSaveAlbum: (id: string) => void;
+  toggleLikeSong: (id: string, title?: string, artist?: string) => void;
+  toggleFollowArtist: (id: string, name?: string) => void;
+  toggleSaveAlbum: (id: string, artist?: string) => void;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
@@ -44,9 +49,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   );
 
   const toggleLikeSong = useCallback(
-    (id: string, title?: string) => {
+    (id: string, title?: string, artist?: string) => {
       const adding = !likedSongs.includes(id);
       setLikedSongs((prev) => toggleInList(prev, id));
+      if (artist) recordAffLike(artist, adding);
       // Confirm with a top-center toast (View jumps to Liked Songs).
       if (title) {
         if (adding) {
@@ -73,12 +79,20 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     [setLikedSongs, likedSongs],
   );
   const toggleFollowArtist = useCallback(
-    (id: string) => setFollowedArtists((prev) => toggleInList(prev, id)),
-    [setFollowedArtists],
+    (id: string, name?: string) => {
+      const adding = !followedArtists.includes(id);
+      setFollowedArtists((prev) => toggleInList(prev, id));
+      if (name) recordAffFollow(name, adding);
+    },
+    [setFollowedArtists, followedArtists],
   );
   const toggleSaveAlbum = useCallback(
-    (id: string) => setSavedAlbums((prev) => toggleInList(prev, id)),
-    [setSavedAlbums],
+    (id: string, artist?: string) => {
+      const adding = !savedAlbums.includes(id);
+      setSavedAlbums((prev) => toggleInList(prev, id));
+      if (artist) recordAffSave(artist, adding);
+    },
+    [setSavedAlbums, savedAlbums],
   );
 
   const isSongLiked = useCallback(

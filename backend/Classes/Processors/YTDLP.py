@@ -676,3 +676,151 @@ class YTDLP:
             return result
         except Exception:
             return None
+
+    # ------------------------------------------------------------------
+    # Recommendation substrate: taste-driven candidate pool (free).
+    # ------------------------------------------------------------------
+
+    def artist_id_for_name(self, name:str, cache_ttl_seconds:int=86400) -> str:
+        """Best Deezer artist id for a display name (cached, '' if none)."""
+        name = (name or "").strip()
+        if not name or name.lower() == "unknown artist":
+            return ""
+        cache_key = f"dz:artist-id:{name.lower()}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        try:
+            found = self.search_collection("artist", name, max_results=1)
+            artist_id = found[0]["id"] if found else ""
+            if artist_id:
+                self._cache_set(cache_key, artist_id, cache_ttl_seconds)
+            return artist_id
+        except Exception:
+            return ""
+
+    def related_artists(self, artist_id:str, limit:int=4, cache_ttl_seconds:int=86400) -> list[dict]:
+        artist_id = (artist_id or "").strip()
+        if not artist_id:
+            return []
+        cache_key = f"dz:related:{artist_id}:{limit}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        results = []
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/artist/{artist_id}/related", timeout=12)
+            if data and isinstance(data, dict):
+                for item in (data.get("data") or [])[:limit]:
+                    normalized = self._normalize_artist(item)
+                    if normalized:
+                        results.append(normalized)
+        except Exception:
+            pass
+        if results:
+            self._cache_set(cache_key, results, cache_ttl_seconds)
+        return results
+
+    def artist_radio(self, artist_id:str, limit:int=6, cache_ttl_seconds:int=3600) -> list[dict]:
+        artist_id = (artist_id or "").strip()
+        if not artist_id:
+            return []
+        cache_key = f"dz:radio:{artist_id}:{limit}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        results = []
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/artist/{artist_id}/radio?limit={limit}", timeout=12)
+            if data and isinstance(data, dict):
+                for item in (data.get("data") or [])[:limit]:
+                    normalized = self._normalize_detail_track(item)
+                    if normalized:
+                        results.append(normalized)
+        except Exception:
+            pass
+        if results:
+            self._cache_set(cache_key, results, cache_ttl_seconds)
+        return results
+
+    def artist_top(self, artist_id:str, limit:int=3, cache_ttl_seconds:int=3600) -> list[dict]:
+        artist_id = (artist_id or "").strip()
+        if not artist_id:
+            return []
+        cache_key = f"dz:top:{artist_id}:{limit}"
+        cached = self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return cached
+        results = []
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/artist/{artist_id}/top?limit={limit}", timeout=12)
+            if data and isinstance(data, dict):
+                for item in (data.get("data") or [])[:limit]:
+                    normalized = self._normalize_detail_track(item)
+                    if normalized:
+                        results.append(normalized)
+        except Exception:
+            pass
+        if results:
+            self._cache_set(cache_key, results, cache_ttl_seconds)
+        return results
+
+    def mix_candidates(self, artist_names:list[str] | None = None, genres:list[str] | None = None, exclude_titles:list[str] | None = None, limit:int=40, cache_ttl_seconds:int=3600, fresh:bool=False) -> list[dict]:
+        """
+        Taste-driven candidate pool: related artists' top tracks, artist
+        radio tracks, and genre fills — normalized to discovery shape,
+        deduped, excluding titles the user already knows.
+        """
+        artist_names = [(a or "").strip() for a in (artist_names or []) if (a or "").strip()][:5]
+        genres = [(g or "").strip() for g in (genres or []) if (g or "").strip()][:3]
+        excluded = {(t or "").strip().lower() for t in (exclude_titles or []) if (t or "").strip()}
+        import hashlib
+        sig = hashlib.md5(f"{'|'.join(a.lower() for a in artist_names)}::{'|'.join(g.lower() for g in genres)}::{limit}".encode()).hexdigest()
+        cache_key = f"dz:mixcand:{sig}"
+        cached = None if fresh else self._memo_get(cache_key, cache_ttl_seconds)
+        if cached:
+            return [c for c in cached if c.get("title", "").lower() not in excluded][:limit]
+
+        seen:set[str] = set()
+        results:list[dict] = []
+
+        def _add(track:dict | None) -> None:
+            if not track:
+                return
+            title = (track.get("title") or "").strip()
+            artist = (track.get("artist") or "").strip()
+            key = f"{title.lower()}::{artist.lower()}"
+            if not title or key in seen or title.lower() in excluded:
+                return
+            seen.add(key)
+            results.append(track)
+
+        for name in artist_names:
+            artist_id = self.artist_id_for_name(name)
+            if not artist_id:
+                continue
+            for rel in self.related_artists(artist_id, limit=3):
+                for track in self.artist_top(rel["id"], limit=2):
+                    _add(track)
+                    if len(results) >= limit:
+                        break
+                if len(results) >= limit:
+                    break
+            for track in self.artist_radio(artist_id, limit=4):
+                _add(track)
+                if len(results) >= limit:
+                    break
+            if len(results) >= limit:
+                break
+
+        for genre in genres:
+            for track in self._search_deezer(genre, max_results=3):
+                _add(track)
+                if len(results) >= limit:
+                    break
+            if len(results) >= limit:
+                break
+
+        if results:
+            self._cache_set(cache_key, results, cache_ttl_seconds)
+        return results[:limit]

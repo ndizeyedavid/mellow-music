@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MdPlayArrow } from "react-icons/md";
 import { EmptyState } from "../components/EmptyState";
@@ -89,20 +89,29 @@ function SearchResults({
   const [artists, setArtists] = useState<ApiArtist[]>([]);
   const [playlists, setPlaylists] = useState<ApiPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [fullFetched, setFullFetched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+
+  // Song pages: 10 first, up to SONG_MAX on scroll (backend caps at 20).
+  const SONG_FIRST = 10;
+  const SONG_MAX = 20;
 
   // Debounced multi-type search: song engine + (Deezer-only) collections.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const songSearch = searchApi(query, 10, provider).then((songRes) => {
-        setSongs(songRes);
-      });
+      const songSearch = searchApi(query, SONG_FIRST, provider).then(
+        (songRes) => {
+          setSongs(songRes);
+        },
+      );
       const collectionSearch = deezerOnly
         ? Promise.resolve()
         : Promise.all([
-            searchAlbums(query, 8),
-            searchArtists(query, 8),
-            searchPlaylists(query, 8),
+            searchAlbums(query, 10),
+            searchArtists(query, 10),
+            searchPlaylists(query, 10),
           ]).then(([albumRes, artistRes, playlistRes]) => {
             setAlbums(albumRes);
             setArtists(artistRes);
@@ -115,7 +124,43 @@ function SearchResults({
         .finally(() => setLoading(false));
     }, 300);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, provider, deezerOnly]);
+
+  // Infinite scroll for songs: fetch the full page when the sentinel shows.
+  const hasMoreSongs =
+    !loading &&
+    !error &&
+    !fullFetched &&
+    songs.length >= SONG_FIRST &&
+    songs.length < SONG_MAX;
+  useEffect(() => {
+    const sentinel = moreRef.current;
+    if (!sentinel || !hasMoreSongs || loadingMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setLoadingMore(true);
+          searchApi(query, SONG_MAX, provider)
+            .then((full) => {
+              setFullFetched(true);
+              setSongs((prev) => {
+                const seen = new Set(prev.map((s) => s.id));
+                return [...prev, ...full.filter((s) => !seen.has(s.id))];
+              });
+            })
+            .catch(() => {
+              // Keep what we have; a retry happens on next intersection.
+            })
+            .finally(() => setLoadingMore(false));
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMoreSongs, loadingMore, query, provider]);
 
   const show = (id: Tab) => tab === "all" || tab === id;
   const hasAny =
@@ -212,6 +257,7 @@ function SearchResults({
               onPlaySongs={(items, i) => void playItems(items, i)}
               isResolvingItem={isResolving}
               resolvingActive={resolvingKey !== null}
+              onShowAllSongs={() => setTab("songs")}
             />
           ) : (
             <>
@@ -229,6 +275,28 @@ function SearchResults({
                     resolvingActive={resolvingKey !== null}
                     enableAdd
                   />
+                  {/* Infinite-scroll sentinel */}
+                  {(hasMoreSongs || loadingMore) && (
+                    <div ref={moreRef} aria-hidden={!hasMoreSongs}>
+                      {loadingMore && (
+                        <div className="space-y-3 py-2" aria-label="Loading more songs">
+                          {Array.from({ length: 3 }).map((_, i) => (
+                            <div
+                              key={i}
+                              aria-hidden="true"
+                              className="flex items-center gap-3 p-3"
+                            >
+                              <div className="h-10 w-10 animate-pulse rounded-md bg-white/5" />
+                              <div className="flex-1">
+                                <div className="h-4 w-1/3 animate-pulse rounded bg-white/5" />
+                                <div className="mt-1.5 h-3 w-1/4 animate-pulse rounded bg-white/5" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               )}
 
@@ -307,6 +375,7 @@ function AllResults({
   onPlaySongs,
   isResolvingItem,
   resolvingActive,
+  onShowAllSongs,
 }: {
   songs: ApiDiscoveryItem[];
   albums: ApiAlbum[];
@@ -317,6 +386,7 @@ function AllResults({
   onPlaySongs: (items: ApiDiscoveryItem[], index: number) => void;
   isResolvingItem: (item: ApiDiscoveryItem, index: number) => boolean;
   resolvingActive: boolean;
+  onShowAllSongs: () => void;
 }) {
   const top = songs[0];
   const topTitle = top?.title?.trim() || "Unknown title";
@@ -388,11 +458,22 @@ function AllResults({
             </div>
           </section>
 
-          {/* Top songs */}
+          {/* Top songs (all fetched, up to 10) */}
           <section aria-label="Top songs">
-            <h2 className="text-[18px]/[24px] font-semibold text-fg">Songs</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-[18px]/[24px] font-semibold text-fg">
+                Songs
+              </h2>
+              <button
+                type="button"
+                onClick={onShowAllSongs}
+                className="cursor-pointer text-[13px]/[18px] font-medium text-subtle transition-colors hover:text-fg"
+              >
+                Show all
+              </button>
+            </div>
             <ApiTrackList
-              items={songs.slice(0, 5)}
+              items={songs}
               currentTitle={currentTitle}
               isPlaying={isPlaying}
               onPlay={(i) => onPlaySongs(songs, i)}
