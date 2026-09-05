@@ -104,12 +104,17 @@ class YTDLP:
                 Files.COOKIE.YT.write_bytes(base64.b64decode(cookie_b64))
             except Exception:
                 pass
-        self.saavn_base = (os.getenv("SAAVN_API_URL") or "https://jiosaavn-api.vercel.app").rstrip("/")
+        proxy = (os.getenv("YTDLP_PROXY") or "").strip() or None
         for downloader in self.downloaders + self.searchDownloaders:
             try:
                 cookies.load_cookies(Files.COOKIE.YT, None, downloader)
             except Exception:
                 pass
+            if proxy:
+                try:
+                    downloader.params["proxy"] = proxy
+                except Exception:
+                    pass
 
 
     def get_downloader(self, stringValue:str):
@@ -844,9 +849,8 @@ class YTDLP:
         return results[:limit]
 
     # ------------------------------------------------------------------
-    # Google-free audio: Deezer metadata + JioSaavn audio + oEmbed titles.
-    # Used when YouTube is unreachable (datacenter bot checks). Playback
-    # quality is equivalent; thumbnails stay Deezer canonical.
+    # Bot-check resilience: Deezer canonical metadata + previews, optional
+    # cookies (YT_COOKIES_B64) and proxy (YTDLP_PROXY) for yt-dlp traffic.
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -948,159 +952,3 @@ class YTDLP:
             return {"audio_url": data["preview"], "duration": 30}
         except Exception:
             return None
-
-    def saavn_search(self, query:str, limit:int=6) -> list[dict]:
-        query = (query or "").strip()
-        if not query:
-            return []
-        try:
-            import requests
-            url = f"{self.saavn_base}/api/search?query={requests.utils.quote(query)}"
-            data = self._request_json(url, timeout=15)
-            if not isinstance(data, dict):
-                return []
-            return (data.get("results") or [])[:limit]
-        except Exception:
-            return []
-
-    @staticmethod
-    def _saavn_artist(item:dict) -> str:
-        for key in ("primary_artists", "singers", "artist"):
-            value = item.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip().split(",")[0].strip()
-            if isinstance(value, list) and value:
-                first = value[0]
-                if isinstance(first, dict) and first.get("name"):
-                    return str(first["name"]).strip()
-                if isinstance(first, str) and first.strip():
-                    return first.strip().split(",")[0].strip()
-        artists = item.get("artists")
-        if isinstance(artists, dict):
-            for group in ("primary", "featured", "all"):
-                group_list = artists.get(group)
-                if isinstance(group_list, list) and group_list:
-                    name = group_list[0].get("name") if isinstance(group_list[0], dict) else group_list[0]
-                    if name:
-                        return str(name).strip()
-        return ""
-
-    @staticmethod
-    def _saavn_cover(item:dict) -> str:
-        images = item.get("images")
-        if isinstance(images, dict):
-            for size in ("500x500", "150x150", "50x50"):
-                if images.get(size):
-                    return str(images[size])
-        for key in ("image", "cover"):
-            if item.get(key):
-                return str(item[key])
-        return ""
-
-    def saavn_detail(self, saavn_id:str) -> dict | None:
-        saavn_id = (saavn_id or "").strip()
-        if not saavn_id:
-            return None
-        cache_key = f"saavn:detail:{saavn_id}"
-        cached = self._memo_get(cache_key, 86400)
-        if cached:
-            return cached
-        try:
-            data = self._request_json(f"{self.saavn_base}/song?id={saavn_id}", timeout=15)
-            if not data or not isinstance(data, dict):
-                return None
-            detail = {
-                "title": data.get("song") or data.get("title") or "",
-                "artist": self._saavn_artist(data),
-                "cover": self._saavn_cover(data),
-                "duration": self._duration_to_seconds(data.get("duration")),
-                "media_url": self.pick_saavn_media(data),
-                "saavn_id": saavn_id,
-            }
-            if detail["media_url"]:
-                self._cache_set(cache_key, detail, 86400)
-                return detail
-            return None
-        except Exception:
-            return None
-
-    @staticmethod
-    def pick_saavn_media(detail:dict) -> str:
-        """Best playable URL from a Saavn detail object (any observed shape)."""
-        if not isinstance(detail, dict):
-            return ""
-        direct = detail.get("media_url") or detail.get("audio_url") or detail.get("url")
-        if isinstance(direct, str) and direct.startswith("http"):
-            return direct
-        media_urls = detail.get("media_urls")
-        if isinstance(media_urls, dict) and media_urls:
-            def _rank(key:str) -> int:
-                import re
-                match = re.search(r"(\d+)", key or "")
-                return int(match.group(1)) if match else 0
-            for key in sorted(media_urls, key=_rank, reverse=True):
-                url = media_urls[key]
-                if isinstance(url, str) and url.startswith("http"):
-                    return url
-        if isinstance(media_urls, list):
-            best, best_rank = "", -1
-            for entry in media_urls:
-                if not isinstance(entry, dict):
-                    continue
-                url = entry.get("url") or ""
-                quality = str(entry.get("quality") or "")
-                import re
-                match = re.search(r"(\d+)", quality)
-                rank = int(match.group(1)) if match else 0
-                if isinstance(url, str) and url.startswith("http") and rank >= best_rank:
-                    best, best_rank = url, rank
-            if best:
-                return best
-        download = detail.get("downloadUrl")
-        if isinstance(download, list):
-            for entry in sorted(download, key=lambda e: str(e.get("quality") or ""), reverse=True):
-                url = entry.get("url") if isinstance(entry, dict) else None
-                if isinstance(url, str) and url.startswith("http"):
-                    return url
-        return ""
-
-    def saavn_best_audio(self, title:str, artist:str = "", limit:int=6) -> dict | None:
-        """
-        Full-length audio for a title/artist without touching Google.
-        Returns {audio_url, thumbnail, duration, saavn_id} or None.
-        """
-        title = (title or "").strip()
-        artist = (artist or "").strip()
-        if not title:
-            return None
-        query = f"{artist} {title}".strip()
-        for item in self.saavn_search(query, limit=limit):
-            item_title = str(item.get("title") or item.get("song") or "")
-            item_artist = self._saavn_artist(item)
-            if not self._names_match(title, artist, item_title, item_artist):
-                continue
-            saavn_id = str(item.get("id") or "")
-            if not saavn_id:
-                continue
-            detail = self.saavn_detail(saavn_id)
-            if detail and detail["media_url"]:
-                return detail
-        return None
-
-    def oembed_title(self, video_id:str) -> tuple[str, str]:
-        """
-        Video title/author via YouTube's oEmbed endpoint (plain HTTPS, no
-        extractor, usually unchallenged). Returns (title, author).
-        """
-        video_id = (video_id or "").strip()
-        if not video_id:
-            return "", ""
-        try:
-            import requests
-            url = f"https://www.youtube.com/oembed?url={requests.utils.quote('https://www.youtube.com/watch?v=' + video_id)}&format=json"
-            data = self._request_json(url, timeout=10)
-            if not data or not isinstance(data, dict):
-                return "", ""
-            return (data.get("title") or "").strip(), (data.get("author_name") or "").strip()
-        except Exception:
-            return "", ""
