@@ -1,6 +1,30 @@
-# FastAPI Cloud entrypoint config. Dependencies intentionally live in
-# requirements.txt (single source of truth); this file only tells the
-# `fastapi` CLI which object to serve. Python version is pinned via
-# .python-version (3.13, matching local dev).
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mellow-music-backend"
+version = "1.0.0"
+description = "Community-first music backend (FastAPI) for Mellow Music"
+requires-python = "==3.13.*"
+dependencies = [
+    "fastapi[standard]",
+    "mysql-connector-python",
+    "yt-dlp",
+    "spotipy",
+    "customisedLogs",
+    "rateLimitedQueues",
+    "randomisedString",
+    "autoReRun",
+    "cryptography",
+    "requests",
+    "redis",
+]
+
+# No distributable packages: code runs from source, this project exists
+# so the platform installs dependencies and finds the entrypoint below.
+[tool.setuptools]
+packages = []
+
 [tool.fastapi]
 entrypoint = "_server:app"
