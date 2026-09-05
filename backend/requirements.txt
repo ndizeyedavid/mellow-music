@@ -26,3 +26,6 @@ bidict
 
 # HTTP
 requests
+
+# Cache
+redis
