@@ -1,14 +1,8 @@
-# Web framework
-fastapi
-uvicorn[standard]
-flask
-flask-sock
-gevent
-jinja2
+# Web framework (fastapi[standard] provides the `fastapi` CLI the platform boots with)
+fastapi[standard]
 
 # Database
 mysql-connector-python
-pooledMySQL
 
 # Music APIs
 yt-dlp
@@ -22,7 +16,6 @@ autoReRun
 
 # Security / crypto
 cryptography
-bidict
 
 # HTTP
 requests

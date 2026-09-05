@@ -1,0 +1,6 @@
+# FastAPI Cloud entrypoint config. Dependencies intentionally live in
+# requirements.txt (single source of truth); this file only tells the
+# `fastapi` CLI which object to serve. Python version is pinned via
+# .python-version (3.13, matching local dev).
+[tool.fastapi]
+entrypoint = "_server:app"
