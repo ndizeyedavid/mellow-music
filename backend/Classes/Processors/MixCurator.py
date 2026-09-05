@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from datetime import datetime, timedelta
 from threading import Lock
 
@@ -7,6 +8,8 @@ import requests
 
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
+# Fallback cooldown after a 429 before any new Groq call is attempted.
+COOLDOWN_SECONDS = 60
 
 
 class MixCurator:
@@ -23,6 +26,11 @@ class MixCurator:
         self._lock = Lock()
         self._mix_cache:dict[str, tuple[datetime, dict]] = {}
         self._cache_lock = Lock()
+        # Single-flight: concurrent identical requests share one Groq call.
+        self._inflight:dict[str, threading.Event] = {}
+        self._inflight_lock = Lock()
+        # 429 circuit breaker: timestamp until which Groq is left alone.
+        self._cooldown_until:datetime | None = None
 
     @staticmethod
     def _config() -> tuple[str, str]:
@@ -43,6 +51,8 @@ class MixCurator:
         """
         key, model = self._config()
         if not key or not candidates:
+            return None
+        if self._cooling_down():
             return None
         pool = [c for c in candidates if c.get("id")][:40]
         if not pool:
@@ -81,6 +91,9 @@ class MixCurator:
                     },
                     timeout=45,
                 )
+            if response.status_code == 429:
+                self._start_cooldown(response.headers.get("Retry-After"))
+                return None
             if response.status_code != 200:
                 self._log(f"Groq HTTP {response.status_code}: {response.text[:200]}")
                 return None
@@ -122,19 +135,58 @@ class MixCurator:
         """
         Cached curation: repeat tastes return instantly without LLM spend.
         fresh=True bypasses the read (still writes) for forced re-curation.
+        Concurrent identical requests share a single Groq call (single-flight).
         Returns the curated dict or None (caller falls back to deterministic).
         """
-        if not fresh:
-            with self._cache_lock:
-                if signature in self._mix_cache:
-                    cached_time, cached_value = self._mix_cache[signature]
-                    if datetime.now() - cached_time < timedelta(seconds=cache_ttl_seconds):
-                        return cached_value
-        result = self.curate(artists, candidates, limit=limit)
-        if result:
-            with self._cache_lock:
-                self._mix_cache[signature] = (datetime.now(), result)
-        return result
+        hit = None if fresh else self.peek(signature, cache_ttl_seconds)
+        if hit:
+            return hit
+        with self._inflight_lock:
+            waiter = self._inflight.get(signature)
+            if waiter is None:
+                waiter = threading.Event()
+                self._inflight[signature] = waiter
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            waiter.wait(timeout=90)
+            return self.peek(signature, cache_ttl_seconds)
+        try:
+            result = self.curate(artists, candidates, limit=limit)
+            if result:
+                with self._cache_lock:
+                    self._mix_cache[signature] = (datetime.now(), result)
+            return result
+        finally:
+            with self._inflight_lock:
+                self._inflight.pop(signature, None)
+            waiter.set()
+
+    def _cooling_down(self) -> bool:
+        return (
+            self._cooldown_until is not None
+            and datetime.now() < self._cooldown_until
+        )
+
+    def _start_cooldown(self, retry_after:str | None) -> None:
+        try:
+            seconds = int((retry_after or "").strip())
+            if seconds <= 0 or seconds > 600:
+                seconds = COOLDOWN_SECONDS
+        except (ValueError, AttributeError):
+            seconds = COOLDOWN_SECONDS
+        self._cooldown_until = datetime.now() + timedelta(seconds=seconds)
+        self._log(f"Groq rate-limited: cooling down for {seconds}s")
+
+    def peek(self, signature:str, cache_ttl_seconds:int=21600) -> dict | None:
+        """Fresh cache read without triggering any LLM call."""
+        with self._cache_lock:
+            if signature in self._mix_cache:
+                cached_time, cached_value = self._mix_cache[signature]
+                if datetime.now() - cached_time < timedelta(seconds=cache_ttl_seconds):
+                    return cached_value
+        return None
 
     def _log(self, message:str) -> None:
         try:

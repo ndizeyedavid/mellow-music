@@ -106,7 +106,8 @@ class SongCache:
                 if not song.audio_url:
                     self.__fail_fetch(song, "No playable audio found for this video.")
                     return
-                Thread(target=song.fetch_stream).start()
+                # NOTE: no eager fetch_stream — audio downloads lazily on
+                # first /api/audio read (see SongData.ensure_stream).
                 thumbnails = r.get("thumbnails") or []
                 song.thumbnail = thumbnails[0].get('url') if thumbnails else None
 
@@ -132,7 +133,7 @@ class SongCache:
                 if not song.audio_url:
                     self.__fail_fetch(song, f"No playable audio for '{string}'.")
                     return
-                Thread(target=song.fetch_stream).start()
+                # NOTE: no eager fetch_stream — see YT_URL branch above.
                 song.duration = first.get('duration')
                 song.thumbnail = first.get('thumbnail') or None
 
@@ -188,7 +189,6 @@ class SongCache:
             song.song_name = fetched[DBTables.SONGS.REAL_NAME]
             song.duration = fetched[DBTables.SONGS.DURATION]
             song.audio_url = fetched[DBTables.SONGS.AUDIO_URL]
-            Thread(target=song.fetch_stream).start()
             song.thumbnail = fetched[DBTables.SONGS.THUMBNAIL]
             song.expiry = fetched[DBTables.SONGS.LAST_UPDATED] + timedelta(hours=5)
             if not asRepeat: self.__renew_expiry(song, None)
@@ -220,7 +220,6 @@ class SongCache:
         """
         if url:
             song.audio_url = url
-            Thread(target=song.fetch_stream).start()
             song.expiry = datetime.now()+timedelta(hours=5)
             song.last_fetched_at = datetime.now()
         elif datetime.now() > song.expiry:

@@ -5,6 +5,31 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+
+def _load_env_file(path: str) -> None:
+    """
+    Minimal .env loader (no third-party dependency): KEY=VALUE lines with
+    # comments and optional quotes. Shell exports always win — values are
+    # only filled in when missing, so this is restart-safe and side-effect
+    free for already-configured environments.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+_load_env_file(os.path.join(os.path.dirname(BACKEND_DIR), ".env"))
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -193,9 +218,25 @@ def _mixAPI(
         artist_names=names, genres=genre_list, exclude_titles=excluded, limit=limit,
         fresh=fresh,
     )
+    # Stable signature: taste only, NOT the ever-growing exclude list, so
+    # repeat tastes (e.g. autoplay continuations) hit the cache instead of
+    # burning a fresh Groq call every time.
     sig = hashlib.md5(f"{'|'.join(names)}::{'|'.join(genre_list)}::{limit}".encode()).hexdigest()
+    excluded_lower = {e.lower() for e in excluded}
     # Full curator upgrade when a key is configured; otherwise deterministic.
     if Curator.available() and tracks:
+        if not fresh:
+            cached = Curator.peek(sig)
+            if cached:
+                survivors = [t for t in cached.get("tracks", []) if t.get("title", "").lower() not in excluded_lower]
+                if len(survivors) >= min(3, limit):
+                    return {
+                        "mix_id": sig,
+                        "name": cached.get("name", ""),
+                        "blurb": cached.get("blurb", ""),
+                        "tracks": survivors[:limit],
+                        "curated": True,
+                    }
         curated = Curator.curate_cached(sig, names, tracks, limit=limit, fresh=fresh)
         if curated:
             return {
