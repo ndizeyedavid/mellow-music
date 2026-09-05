@@ -25,7 +25,7 @@ backend/.venv/
 backend/__pycache__/
 # Secrets.py is env-driven with safe defaults and IS committed; only the
 # YouTube cookie file stays out (export it per environment instead).
-backend/Hidden/YT-COOKIES
+# backend/Hidden/YT-COOKIES
 backend/Temp/
 backend/Static/js/dynamicWebsite.js
 backend/Static/js/hotwire.js
