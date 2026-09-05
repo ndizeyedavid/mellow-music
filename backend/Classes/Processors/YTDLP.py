@@ -78,6 +78,9 @@ class YTDLP:
                        'quiet': True,
                        'no_warnings': True,
                        'default_search': 'auto',
+                       'retries': 2,
+                       'extractor_retries': 2,
+                       'socket_timeout': 15,
                        'js_runtimes': {'node': {}}}),
             YoutubeDL({'extract_flat': True,
                        'skip_download': True,
@@ -85,8 +88,23 @@ class YTDLP:
                        'quiet': True,
                        'no_warnings': True,
                        'default_search': 'auto',
+                       'retries': 2,
+                       'extractor_retries': 2,
+                       'socket_timeout': 15,
                        'js_runtimes': {'node': {}}})
         ]
+        # Optional base64-encoded Netscape cookie file for YouTube, so hosts
+        # that cannot receive the YT-COOKIES file (gitignored) can still get
+        # it through the YT_COOKIES_B64 environment variable.
+        cookie_b64 = (os.getenv("YT_COOKIES_B64") or "").strip()
+        if cookie_b64:
+            try:
+                import base64
+                Files.COOKIE.YT.parent.mkdir(parents=True, exist_ok=True)
+                Files.COOKIE.YT.write_bytes(base64.b64decode(cookie_b64))
+            except Exception:
+                pass
+        self.saavn_base = (os.getenv("SAAVN_API_URL") or "https://jiosaavn-api.vercel.app").rstrip("/")
         for downloader in self.downloaders + self.searchDownloaders:
             try:
                 cookies.load_cookies(Files.COOKIE.YT, None, downloader)
@@ -824,3 +842,265 @@ class YTDLP:
         if results:
             self._cache_set(cache_key, results, cache_ttl_seconds)
         return results[:limit]
+
+    # ------------------------------------------------------------------
+    # Google-free audio: Deezer metadata + JioSaavn audio + oEmbed titles.
+    # Used when YouTube is unreachable (datacenter bot checks). Playback
+    # quality is equivalent; thumbnails stay Deezer canonical.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clean_name(value:str) -> str:
+        import re
+        text = (value or "").lower()
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _names_match(self, title_a:str, artist_a:str, title_b:str, artist_b:str) -> bool:
+        """True when titles overlap AND artists overlap (rejects wrong versions)."""
+        ta, tb = self._clean_name(title_a), self._clean_name(title_b)
+        aa, ab = self._clean_name(artist_a), self._clean_name(artist_b)
+        if not ta or not tb:
+            return False
+        title_ok = ta == tb or (len(ta) >= 4 and ta in tb) or (len(tb) >= 4 and tb in ta)
+        if not aa and not ab:
+            return title_ok
+        artist_ok = bool(aa and ab) and (aa == ab or aa in ab or ab in aa)
+        return bool(title_ok and artist_ok)
+
+    @staticmethod
+    def _duration_to_seconds(value) -> int:
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+        if isinstance(value, str) and ":" in value:
+            try:
+                parts = [int(p) for p in value.strip().split(":")]
+                total = 0
+                for part in parts:
+                    total = total * 60 + part
+                return total if total > 0 else 0
+            except (ValueError, AttributeError):
+                return 0
+        return 0
+
+    def deezer_track_meta(self, query:str) -> dict | None:
+        """
+        Canonical metadata for a search string: title, artist, cover,
+        duration, 30s preview and Deezer track id. None when nothing matches.
+        """
+        query = (query or "").strip()
+        if not query:
+            return None
+        cache_key = f"dz:meta:{query.lower()}"
+        cached = self._memo_get(cache_key, 86400)
+        if cached:
+            return cached
+        try:
+            import requests
+            url = f"{self.DEEZER_API}/search/track?q={requests.utils.quote(query)}&limit=5"
+            data = self._request_json(url, timeout=12)
+            items = (data.get("data") or []) if isinstance(data, dict) else []
+            if not items:
+                return None
+            if " - " in query:
+                artist_guess, _, title_guess = query.partition(" - ")
+            else:
+                artist_guess, title_guess = "", query
+            chosen = None
+            for item in items:
+                artist = item.get("artist") or {}
+                artist_name = artist.get("name") if isinstance(artist, dict) else ""
+                if self._names_match(title_guess or query, artist_guess, item.get("title") or "", artist_name or ""):
+                    chosen = item
+                    break
+            if chosen is None:
+                first = items[0]
+                artist = first.get("artist") or {}
+                artist_name = artist.get("name") if isinstance(artist, dict) else ""
+                if " - " not in query and self._clean_name(query) in self._clean_name(first.get("title") or ""):
+                    chosen = first
+            if chosen is None:
+                return None
+            artist = chosen.get("artist") or {}
+            album = chosen.get("album") or {}
+            meta = {
+                "title": chosen.get("title") or chosen.get("title_short") or query,
+                "artist": artist.get("name") if isinstance(artist, dict) else "Unknown Artist",
+                "cover": album.get("cover_big") or album.get("cover_medium") or "",
+                "duration": chosen.get("duration") or 0,
+                "preview": chosen.get("preview") or "",
+                "deezer_id": str(chosen.get("id") or ""),
+            }
+            self._cache_set(cache_key, meta, 86400)
+            return meta
+        except Exception:
+            return None
+
+    def deezer_preview(self, deezer_id:str) -> dict | None:
+        """Refresh a 30s preview URL for a Deezer track id."""
+        deezer_id = (deezer_id or "").strip()
+        if not deezer_id:
+            return None
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/track/{deezer_id}", timeout=12)
+            if not data or not isinstance(data, dict) or not data.get("preview"):
+                return None
+            return {"audio_url": data["preview"], "duration": 30}
+        except Exception:
+            return None
+
+    def saavn_search(self, query:str, limit:int=6) -> list[dict]:
+        query = (query or "").strip()
+        if not query:
+            return []
+        try:
+            import requests
+            url = f"{self.saavn_base}/api/search?query={requests.utils.quote(query)}"
+            data = self._request_json(url, timeout=15)
+            if not isinstance(data, dict):
+                return []
+            return (data.get("results") or [])[:limit]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _saavn_artist(item:dict) -> str:
+        for key in ("primary_artists", "singers", "artist"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip().split(",")[0].strip()
+            if isinstance(value, list) and value:
+                first = value[0]
+                if isinstance(first, dict) and first.get("name"):
+                    return str(first["name"]).strip()
+                if isinstance(first, str) and first.strip():
+                    return first.strip().split(",")[0].strip()
+        artists = item.get("artists")
+        if isinstance(artists, dict):
+            for group in ("primary", "featured", "all"):
+                group_list = artists.get(group)
+                if isinstance(group_list, list) and group_list:
+                    name = group_list[0].get("name") if isinstance(group_list[0], dict) else group_list[0]
+                    if name:
+                        return str(name).strip()
+        return ""
+
+    @staticmethod
+    def _saavn_cover(item:dict) -> str:
+        images = item.get("images")
+        if isinstance(images, dict):
+            for size in ("500x500", "150x150", "50x50"):
+                if images.get(size):
+                    return str(images[size])
+        for key in ("image", "cover"):
+            if item.get(key):
+                return str(item[key])
+        return ""
+
+    def saavn_detail(self, saavn_id:str) -> dict | None:
+        saavn_id = (saavn_id or "").strip()
+        if not saavn_id:
+            return None
+        cache_key = f"saavn:detail:{saavn_id}"
+        cached = self._memo_get(cache_key, 86400)
+        if cached:
+            return cached
+        try:
+            data = self._request_json(f"{self.saavn_base}/song?id={saavn_id}", timeout=15)
+            if not data or not isinstance(data, dict):
+                return None
+            detail = {
+                "title": data.get("song") or data.get("title") or "",
+                "artist": self._saavn_artist(data),
+                "cover": self._saavn_cover(data),
+                "duration": self._duration_to_seconds(data.get("duration")),
+                "media_url": self.pick_saavn_media(data),
+                "saavn_id": saavn_id,
+            }
+            if detail["media_url"]:
+                self._cache_set(cache_key, detail, 86400)
+                return detail
+            return None
+        except Exception:
+            return None
+
+    @staticmethod
+    def pick_saavn_media(detail:dict) -> str:
+        """Best playable URL from a Saavn detail object (any observed shape)."""
+        if not isinstance(detail, dict):
+            return ""
+        direct = detail.get("media_url") or detail.get("audio_url") or detail.get("url")
+        if isinstance(direct, str) and direct.startswith("http"):
+            return direct
+        media_urls = detail.get("media_urls")
+        if isinstance(media_urls, dict) and media_urls:
+            def _rank(key:str) -> int:
+                import re
+                match = re.search(r"(\d+)", key or "")
+                return int(match.group(1)) if match else 0
+            for key in sorted(media_urls, key=_rank, reverse=True):
+                url = media_urls[key]
+                if isinstance(url, str) and url.startswith("http"):
+                    return url
+        if isinstance(media_urls, list):
+            best, best_rank = "", -1
+            for entry in media_urls:
+                if not isinstance(entry, dict):
+                    continue
+                url = entry.get("url") or ""
+                quality = str(entry.get("quality") or "")
+                import re
+                match = re.search(r"(\d+)", quality)
+                rank = int(match.group(1)) if match else 0
+                if isinstance(url, str) and url.startswith("http") and rank >= best_rank:
+                    best, best_rank = url, rank
+            if best:
+                return best
+        download = detail.get("downloadUrl")
+        if isinstance(download, list):
+            for entry in sorted(download, key=lambda e: str(e.get("quality") or ""), reverse=True):
+                url = entry.get("url") if isinstance(entry, dict) else None
+                if isinstance(url, str) and url.startswith("http"):
+                    return url
+        return ""
+
+    def saavn_best_audio(self, title:str, artist:str = "", limit:int=6) -> dict | None:
+        """
+        Full-length audio for a title/artist without touching Google.
+        Returns {audio_url, thumbnail, duration, saavn_id} or None.
+        """
+        title = (title or "").strip()
+        artist = (artist or "").strip()
+        if not title:
+            return None
+        query = f"{artist} {title}".strip()
+        for item in self.saavn_search(query, limit=limit):
+            item_title = str(item.get("title") or item.get("song") or "")
+            item_artist = self._saavn_artist(item)
+            if not self._names_match(title, artist, item_title, item_artist):
+                continue
+            saavn_id = str(item.get("id") or "")
+            if not saavn_id:
+                continue
+            detail = self.saavn_detail(saavn_id)
+            if detail and detail["media_url"]:
+                return detail
+        return None
+
+    def oembed_title(self, video_id:str) -> tuple[str, str]:
+        """
+        Video title/author via YouTube's oEmbed endpoint (plain HTTPS, no
+        extractor, usually unchallenged). Returns (title, author).
+        """
+        video_id = (video_id or "").strip()
+        if not video_id:
+            return "", ""
+        try:
+            import requests
+            url = f"https://www.youtube.com/oembed?url={requests.utils.quote('https://www.youtube.com/watch?v=' + video_id)}&format=json"
+            data = self._request_json(url, timeout=10)
+            if not data or not isinstance(data, dict):
+                return "", ""
+            return (data.get("title") or "").strip(), (data.get("author_name") or "").strip()
+        except Exception:
+            return "", ""

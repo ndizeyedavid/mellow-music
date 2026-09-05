@@ -37,10 +37,21 @@ class SongCache:
 
     def __save_to_db(self, song:SongData) -> None:
         """
-        Store a new song to DB or mark as repeat
+        Store a new song to DB or mark as repeat.
+        Upsert-safe: a row that already carries this song_id (e.g. its
+        source marker changed from a plain video id to saavn:/preview:)
+        is updated in place instead of crashing on the primary key.
         :param song: SongData object with all values
         :return:
         """
+        existing = self.SQLConn.execute(f"SELECT {DBTables.SONGS.SONG_ID} FROM {DBTables.SONGS.TABLE_NAME} WHERE {DBTables.SONGS.SONG_ID}=? LIMIT 1", [song.song_id])
+        if existing:
+            self.SQLConn.execute(f"UPDATE {DBTables.SONGS.TABLE_NAME} SET {DBTables.SONGS.REAL_NAME}=?, {DBTables.SONGS.SPOTIFY_ID}=?, {DBTables.SONGS.YT_ID}=?, {DBTables.SONGS.DURATION}=?, {DBTables.SONGS.THUMBNAIL}=?, {DBTables.SONGS.AUDIO_URL}=?, {DBTables.SONGS.LAST_UPDATED}=NOW() WHERE {DBTables.SONGS.SONG_ID}=?", [song.song_name, song.spotify, song.yt, song.duration, song.thumbnail, song.audio_url, song.song_id])
+            if song.search_name and song.search_name != song.song_name:
+                known_alias = self.SQLConn.execute(f"SELECT {DBTables.ALIASES.SONG_ID} FROM {DBTables.ALIASES.TABLE_NAME} WHERE {DBTables.ALIASES.SONG_ID}=? AND {DBTables.ALIASES.STRING}=? LIMIT 1", [song.song_id, song.search_name])
+                if not known_alias:
+                    self.SQLConn.execute(f"INSERT INTO {DBTables.ALIASES.TABLE_NAME} VALUES (?, ?)", [song.song_id, song.search_name])
+            return
         fetched = self.SQLConn.execute(f"SELECT {DBTables.SONGS.SONG_ID} FROM {DBTables.SONGS.TABLE_NAME} WHERE ({DBTables.SONGS.REAL_NAME}=? AND {'TRUE' if song.song_name else 'FALSE'}) OR ({DBTables.SONGS.YT_ID}=? AND {'TRUE' if song.yt else 'FALSE'}) OR ({DBTables.SONGS.SPOTIFY_ID}=? AND {'TRUE' if song.spotify else 'FALSE'}) LIMIT 1", [song.song_name, song.yt, song.spotify])
         if fetched:
             realID = self.__db_value(fetched[0][DBTables.SONGS.SONG_ID])
@@ -76,6 +87,71 @@ class SongCache:
             song.waiter = None
         Thread(target=self.__remove_cache, args=(song,)).start()
 
+    def __fetch_saavn_by_video(self, song:SongData, video_id:str) -> bool:
+        """
+        Fallback for direct YouTube links when yt-dlp is blocked: resolve
+        the title via oEmbed (plain HTTPS) and match full-length Saavn audio.
+        Returns True on success (song filled, yt marked saavn:<id>).
+        """
+        title, author = self.YTDLP.oembed_title(video_id)
+        if not title:
+            return False
+        if " - " in title:
+            maybe_artist, _, maybe_title = title.partition(" - ")
+        else:
+            maybe_artist, maybe_title = author, title
+        audio = self.YTDLP.saavn_best_audio(maybe_title, maybe_artist)
+        if not audio:
+            return False
+        song.song_name = title
+        song.yt = f"saavn:{audio['saavn_id']}"
+        song.audio_url = audio["media_url"]
+        song.duration = audio.get("duration") or 0
+        song.thumbnail = audio.get("cover") or None
+        return True
+
+    def __finish_refresh(self, song:SongData) -> None:
+        """Persist a refreshed audio URL and release any waiter."""
+        song.expiry = datetime.now() + timedelta(hours=5)
+        song.last_fetched_at = datetime.now()
+        try:
+            self.SQLConn.execute(f"UPDATE {DBTables.SONGS.TABLE_NAME} SET {DBTables.SONGS.LAST_UPDATED}=NOW(), {DBTables.SONGS.AUDIO_URL}=? WHERE {DBTables.SONGS.SONG_ID}=?", [song.audio_url, song.song_id])
+        except Exception:
+            pass
+        if song.waiter is not None:
+            try:
+                song.waiter.set()
+            except Exception:
+                pass
+            song.waiter = None
+        Thread(target=self.__remove_cache, args=(song,)).start()
+
+    def __refresh_saavn(self, song:SongData) -> None:
+        """Renew a saavn:<id> song without touching YouTube."""
+        sid = (song.yt or "").split(":", 1)[1] if ":" in (song.yt or "") else ""
+        detail = self.YTDLP.saavn_detail(sid) if sid else None
+        media = detail.get("media_url") if detail else ""
+        if not media:
+            self.__fail_fetch(song, "Saved audio expired and refresh failed.")
+            return
+        song.audio_url = media
+        if detail.get("cover"):
+            song.thumbnail = detail["cover"]
+        if detail.get("duration"):
+            song.duration = detail["duration"]
+        self.__finish_refresh(song)
+
+    def __refresh_preview(self, song:SongData) -> None:
+        """Renew a preview:<deezer_id> song from the Deezer track endpoint."""
+        did = (song.yt or "").split(":", 1)[1] if ":" in (song.yt or "") else ""
+        refreshed = self.YTDLP.deezer_preview(did) if did else None
+        if not refreshed:
+            self.__fail_fetch(song, "Saved audio expired and refresh failed.")
+            return
+        song.audio_url = refreshed["audio_url"]
+        song.duration = refreshed.get("duration") or 30
+        self.__finish_refresh(song)
+
 
     def __fetch_new(self, song:SongData, category:UrlTypes, string:str) -> None:
         """
@@ -96,20 +172,21 @@ class SongCache:
             if category == UrlTypes.YT_URL:
                 url = self.URLHandler.merge(category, string)
                 r = self.YTDLP.get_downloader(url)
-                if not r:
-                    self.__fail_fetch(song, "YouTube refused this video (bot check). Try again later.")
-                    return
-                song.song_name = r.get("title")
-                song.yt = string
-                song.duration = r.get("duration")
-                song.audio_url = r.get("url")
-                if not song.audio_url:
-                    self.__fail_fetch(song, "No playable audio found for this video.")
-                    return
-                # NOTE: no eager fetch_stream — audio downloads lazily on
-                # first /api/audio read (see SongData.ensure_stream).
-                thumbnails = r.get("thumbnails") or []
-                song.thumbnail = thumbnails[0].get('url') if thumbnails else None
+                if r and r.get("url"):
+                    song.song_name = r.get("title")
+                    song.yt = string
+                    song.duration = r.get("duration")
+                    song.audio_url = r.get("url")
+                    # NOTE: no eager fetch_stream — audio downloads lazily on
+                    # first /api/audio read (see SongData.ensure_stream).
+                    thumbnails = r.get("thumbnails") or []
+                    song.thumbnail = thumbnails[0].get('url') if thumbnails else None
+                else:
+                    # YouTube unreachable (e.g. datacenter bot check):
+                    # oEmbed title -> Saavn full-length audio, no Google.
+                    if not self.__fetch_saavn_by_video(song, string):
+                        self.__fail_fetch(song, "YouTube refused this video (bot check). Try again later.")
+                        return
 
             elif category == UrlTypes.SPOTIFY_URL:
                 details = self.SpotifyAPICollection.fetch_api().API.track(string)
@@ -120,22 +197,43 @@ class SongCache:
                     return
 
             elif category == UrlTypes.UNKNOWN:
-                r = self.YTDLP.get_downloader(string + " lyrics")
-                entries = (r.get("entries") or []) if r else []
-                entries = [e for e in entries if e]
-                if not entries:
-                    self.__fail_fetch(song, f"No results for '{string}'.")
-                    return
-                first = entries[0]
-                song.yt = first.get('id')
-                song.song_name = first.get("title")
-                song.audio_url = first.get('url')
-                if not song.audio_url:
-                    self.__fail_fetch(song, f"No playable audio for '{string}'.")
-                    return
-                # NOTE: no eager fetch_stream — see YT_URL branch above.
-                song.duration = first.get('duration')
-                song.thumbnail = first.get('thumbnail') or None
+                # Deezer-first chain (no Google required):
+                # 1. Deezer canonical metadata, 2. Saavn full-length audio,
+                # 3. yt-dlp search (legacy, best where YouTube is reachable),
+                # 4. Deezer 30s preview as last resort.
+                meta = self.YTDLP.deezer_track_meta(string)
+                display_title = meta["title"] if meta else string
+                display_artist = meta["artist"] if meta else ""
+                audio = self.YTDLP.saavn_best_audio(display_title, display_artist)
+                if audio:
+                    song.song_name = meta["title"] if meta else audio.get("title") or string
+                    song.yt = f"saavn:{audio['saavn_id']}"
+                    song.audio_url = audio["media_url"]
+                    song.duration = (meta["duration"] if meta and meta.get("duration") else None) or audio.get("duration") or 0
+                    song.thumbnail = (meta["cover"] if meta and meta.get("cover") else "") or audio.get("cover") or None
+                else:
+                    r = self.YTDLP.get_downloader(string + " lyrics")
+                    entries = (r.get("entries") or []) if r else []
+                    entries = [e for e in entries if e]
+                    if entries:
+                        first = entries[0]
+                        song.yt = first.get('id')
+                        song.song_name = first.get("title")
+                        song.audio_url = first.get('url')
+                        if not song.audio_url:
+                            self.__fail_fetch(song, f"No playable audio for '{string}'.")
+                            return
+                        song.duration = first.get('duration')
+                        song.thumbnail = first.get('thumbnail') or (meta["cover"] if meta else None)
+                    elif meta and meta.get("preview"):
+                        song.yt = f"preview:{meta['deezer_id']}"
+                        song.song_name = meta["title"]
+                        song.audio_url = meta["preview"]
+                        song.duration = 30
+                        song.thumbnail = meta.get("cover") or None
+                    else:
+                        self.__fail_fetch(song, f"No results for '{string}'.")
+                        return
 
             else:
                 self.__fail_fetch(song, "Unsupported link type.")
@@ -223,7 +321,13 @@ class SongCache:
             song.expiry = datetime.now()+timedelta(hours=5)
             song.last_fetched_at = datetime.now()
         elif datetime.now() > song.expiry:
-            self.__fetch_new(song, UrlTypes.YT_URL, song.yt)
+            marker = song.yt or ""
+            if marker.startswith("saavn:"):
+                self.__refresh_saavn(song)
+            elif marker.startswith("preview:"):
+                self.__refresh_preview(song)
+            else:
+                self.__fetch_new(song, UrlTypes.YT_URL, song.yt)
         else: return
         self.SQLConn.execute(f"UPDATE {DBTables.SONGS.TABLE_NAME} SET {DBTables.SONGS.LAST_UPDATED}=NOW(), {DBTables.SONGS.AUDIO_URL}=? WHERE {DBTables.SONGS.SONG_ID}=?", [song.audio_url, song.song_id])
 
