@@ -81,6 +81,7 @@ class YTDLP:
                        'retries': 2,
                        'extractor_retries': 2,
                        'socket_timeout': 15,
+                       'extractor_args': {'youtube': {'player_client': ['android']}},
                        'js_runtimes': {'node': {}}}),
             YoutubeDL({'extract_flat': True,
                        'skip_download': True,

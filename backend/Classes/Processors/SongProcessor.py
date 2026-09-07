@@ -166,26 +166,49 @@ class SongCache:
                     return
 
             elif category == UrlTypes.UNKNOWN:
-                # Chain: 1. Deezer canonical metadata, 2. yt-dlp search
-                # (full-length, best where YouTube is reachable),
-                # 3. Invidious search+streams (no Google IP), 4. Deezer preview.
+                # Chain: Deezer meta (for clean title/artist/cover), then
+                # YouTube full-length via yt-dlp (multiple sanitized queries
+                # to survive weird quoting like Blaze Of Glory...), then
+                # Invidious, then Deezer 30s preview as last resort.
                 meta = self.YTDLP.deezer_track_meta(string)
-                r = self.YTDLP.get_downloader(string + " lyrics")
-                entries = (r.get("entries") or []) if r else []
-                entries = [e for e in entries if e]
-                if entries:
-                    first = entries[0]
+                # Queries ordered from most specific to most generic.
+                raw_candidates = [string + " lyrics", string]
+                cleaned = self.URLHandler.cleanedTrackName(string)
+                if cleaned and cleaned.lower() != string.lower():
+                    raw_candidates.insert(0, cleaned + " lyrics")
+                    raw_candidates.insert(2, cleaned)
+                # Deduplicate while preserving order, strip stray quotes.
+                seen_q = set()
+                queries = []
+                for q in raw_candidates:
+                    q = q.replace('"', "'").replace("“", "'").replace("”", "'").strip()
+                    if q and q.lower() not in seen_q:
+                        seen_q.add(q.lower())
+                        queries.append(q)
+                first = None
+                r = None
+                for q in queries:
+                    r = self.YTDLP.get_downloader(q)
+                    entries = (r.get("entries") or []) if r and isinstance(r, dict) else []
+                    entries = [e for e in entries if e]
+                    if entries:
+                        first = entries[0]
+                        if first.get("url"):
+                            break
+                        first = None
+                if first and first.get("url"):
                     song.yt = first.get('id')
                     song.song_name = first.get("title")
                     song.audio_url = first.get('url')
-                    if not song.audio_url:
-                        self.__fail_fetch(song, f"No playable audio for '{string}'.")
-                        return
                     song.duration = first.get('duration')
                     song.thumbnail = first.get('thumbnail') or (meta["cover"] if meta else None)
                 else:
                     # YouTube search blocked (datacenter IP): try Invidious.
-                    inv = self.YTDLP.invidious_search(string + " lyrics", max_results=5)
+                    inv = None
+                    for q in queries:
+                        inv = self.YTDLP.invidious_search(q, max_results=5)
+                        if inv:
+                            break
                     if inv:
                         picked = None
                         for item in inv:
