@@ -104,7 +104,44 @@ class SongCache:
         Thread(target=self.__remove_cache, args=(song,)).start()
 
     def __refresh_preview(self, song:SongData) -> None:
-        """Renew a preview:<deezer_id> song from the Deezer track endpoint."""
+        """Renew a preview:<deezer_id> song — try to upgrade to full YouTube first."""
+        # Try to upgrade preview to full YouTube on renewal (so old preview
+        # caches like the reported Blaze Of Glory don't stay 30s forever).
+        try:
+            title = song.song_name or song.search_name
+            if title:
+                cleaned = self.URLHandler.cleanedTrackName(title) or title
+                for q in [cleaned + " lyrics", title + " lyrics", cleaned, title]:
+                    q = q.replace('"', "'").strip()
+                    r = self.YTDLP.get_downloader(q)
+                    entries = (r.get("entries") or []) if r and isinstance(r, dict) else []
+                    entries = [e for e in entries if e]
+                    if entries and entries[0].get("url"):
+                        first = entries[0]
+                        song.yt = first.get('id')
+                        song.song_name = first.get("title") or title
+                        song.audio_url = first.get('url')
+                        song.duration = first.get('duration') or 0
+                        song.thumbnail = first.get('thumbnail') or song.thumbnail
+                        self.__finish_refresh(song)
+                        return
+                # Fallback via Invidious before giving up to preview.
+                for q in [cleaned + " lyrics", title + " lyrics"]:
+                    q = q.replace('"', "'").strip()
+                    inv = self.YTDLP.invidious_search(q, max_results=5)
+                    for item in inv or []:
+                        vid = item.get("id")
+                        streams = self.YTDLP.invidious_streams(vid) if vid else None
+                        if streams and streams.get("audio_url"):
+                            song.yt = item["id"]
+                            song.song_name = item["title"]
+                            song.audio_url = streams["audio_url"]
+                            song.duration = streams.get("duration") or 0
+                            song.thumbnail = item.get("thumbnail") or song.thumbnail
+                            self.__finish_refresh(song)
+                            return
+        except Exception:
+            pass
         did = (song.yt or "").split(":", 1)[1] if ":" in (song.yt or "") else ""
         refreshed = self.YTDLP.deezer_preview(did) if did else None
         if not refreshed:
