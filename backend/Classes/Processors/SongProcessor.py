@@ -134,17 +134,28 @@ class SongCache:
             if category == UrlTypes.YT_URL:
                 url = self.URLHandler.merge(category, string)
                 r = self.YTDLP.get_downloader(url)
-                if not r or not r.get("url"):
-                    self.__fail_fetch(song, "YouTube refused this video (bot check). Try again later.")
-                    return
-                song.song_name = r.get("title")
-                song.yt = string
-                song.duration = r.get("duration")
-                song.audio_url = r.get("url")
-                # NOTE: no eager fetch_stream — audio downloads lazily on
-                # first /api/audio read (see SongData.ensure_stream).
-                thumbnails = r.get("thumbnails") or []
-                song.thumbnail = thumbnails[0].get('url') if thumbnails else None
+                if r and r.get("url"):
+                    song.song_name = r.get("title")
+                    song.yt = string
+                    song.duration = r.get("duration")
+                    song.audio_url = r.get("url")
+                    # NOTE: no eager fetch_stream — audio downloads lazily on
+                    # first /api/audio read (see SongData.ensure_stream).
+                    thumbnails = r.get("thumbnails") or []
+                    song.thumbnail = thumbnails[0].get('url') if thumbnails else None
+                else:
+                    # Direct link blocked: try Invidious streams before failing.
+                    inv = self.YTDLP.invidious_streams(string)
+                    if inv and inv.get("audio_url"):
+                        title = inv.get("title") or string
+                        song.song_name = title
+                        song.yt = string
+                        song.duration = inv.get("duration") or 0
+                        song.audio_url = inv["audio_url"]
+                        song.thumbnail = inv.get("thumbnail") or None
+                    else:
+                        self.__fail_fetch(song, "YouTube refused this video (bot check). Try again later.")
+                        return
 
             elif category == UrlTypes.SPOTIFY_URL:
                 details = self.SpotifyAPICollection.fetch_api().API.track(string)
@@ -157,7 +168,7 @@ class SongCache:
             elif category == UrlTypes.UNKNOWN:
                 # Chain: 1. Deezer canonical metadata, 2. yt-dlp search
                 # (full-length, best where YouTube is reachable),
-                # 3. Deezer 30s preview as last resort.
+                # 3. Invidious search+streams (no Google IP), 4. Deezer preview.
                 meta = self.YTDLP.deezer_track_meta(string)
                 r = self.YTDLP.get_downloader(string + " lyrics")
                 entries = (r.get("entries") or []) if r else []
@@ -172,15 +183,42 @@ class SongCache:
                         return
                     song.duration = first.get('duration')
                     song.thumbnail = first.get('thumbnail') or (meta["cover"] if meta else None)
-                elif meta and meta.get("preview"):
-                    song.yt = f"preview:{meta['deezer_id']}"
-                    song.song_name = meta["title"]
-                    song.audio_url = meta["preview"]
-                    song.duration = 30
-                    song.thumbnail = meta.get("cover") or None
                 else:
-                    self.__fail_fetch(song, f"No results for '{string}'.")
-                    return
+                    # YouTube search blocked (datacenter IP): try Invidious.
+                    inv = self.YTDLP.invidious_search(string + " lyrics", max_results=5)
+                    if inv:
+                        picked = None
+                        for item in inv:
+                            vid = item.get("id")
+                            streams = self.YTDLP.invidious_streams(vid) if vid else None
+                            if streams and streams.get("audio_url"):
+                                picked = (item, streams)
+                                break
+                        if picked:
+                            item, streams = picked
+                            song.yt = item["id"]
+                            song.song_name = item["title"]
+                            song.audio_url = streams["audio_url"]
+                            song.duration = streams.get("duration") or item.get("duration") or 0
+                            song.thumbnail = item.get("thumbnail") or (meta["cover"] if meta else None)
+                        elif meta and meta.get("preview"):
+                            song.yt = f"preview:{meta['deezer_id']}"
+                            song.song_name = meta["title"]
+                            song.audio_url = meta["preview"]
+                            song.duration = 30
+                            song.thumbnail = meta.get("cover") or None
+                        else:
+                            self.__fail_fetch(song, f"No results for '{string}'.")
+                            return
+                    elif meta and meta.get("preview"):
+                        song.yt = f"preview:{meta['deezer_id']}"
+                        song.song_name = meta["title"]
+                        song.audio_url = meta["preview"]
+                        song.duration = 30
+                        song.thumbnail = meta.get("cover") or None
+                    else:
+                        self.__fail_fetch(song, f"No results for '{string}'.")
+                        return
 
             else:
                 self.__fail_fetch(song, "Unsupported link type.")

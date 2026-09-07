@@ -952,3 +952,71 @@ class YTDLP:
             return {"audio_url": data["preview"], "duration": 30}
         except Exception:
             return None
+
+    # --- Invidious fallback (no Google IP, no yt-dlp) ---
+
+    INVIDIOUS = [
+        "https://iv.melmac.space",
+        "https://y.com.sb",
+        "https://invidious.privacydev.net",
+        "https://inv.nadeko.net",
+    ]
+
+    def invidious_search(self, query:str, max_results:int=5) -> list[dict]:
+        query = (query or "").strip()
+        if not query:
+            return []
+        import requests as _rq
+        for base in self.INVIDIOUS:
+            try:
+                data = self._request_json(
+                    f"{base}/api/v1/search?q={_rq.utils.quote(query)}&type=video",
+                    timeout=12,
+                )
+                if not isinstance(data, list) or not data:
+                    continue
+                results = []
+                for item in data[:max_results]:
+                    vid = item.get("videoId") or item.get("id")
+                    if not vid:
+                        continue
+                    results.append({
+                        "id": str(vid),
+                        "title": item.get("title") or "Unknown Title",
+                        "artist": item.get("author") or "Unknown Artist",
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                        "duration": item.get("lengthSeconds") or 0,
+                        "url": f"https://www.youtube.com/watch?v={vid}",
+                    })
+                if results:
+                    return results
+            except Exception:
+                continue
+        return []
+
+    def invidious_streams(self, video_id:str) -> dict | None:
+        video_id = (video_id or "").strip()
+        if not video_id:
+            return None
+        for base in self.INVIDIOUS:
+            try:
+                data = self._request_json(f"{base}/api/v1/videos/{video_id}", timeout=12)
+                if not isinstance(data, dict):
+                    continue
+                adaptive = data.get("adaptiveFormats") or []
+                best:dict | None = None
+                for fmt in adaptive:
+                    if "audio" not in (fmt.get("type") or ""):
+                        continue
+                    if best is None or (fmt.get("bitrate") or 0) > (best.get("bitrate") or 0):
+                        best = fmt
+                if best and best.get("url"):
+                    return {
+                        "audio_url": best["url"],
+                        "duration": data.get("lengthSeconds") or 0,
+                        "title": data.get("title") or "",
+                        "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                    }
+            except Exception:
+                continue
+        return None
