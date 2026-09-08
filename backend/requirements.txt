@@ -6,7 +6,10 @@ uvicorn[standard]
 psycopg[binary]
 pgvector
 
-# Embeddings (all-MiniLM-L6-v2, 384 dims)
+# Embeddings - prefer fastembed (ONNX, ~100MB) over torch (~400MB) to stay under platform memory
+fastembed
+onnxruntime
+# Fallback (only used if fastembed unavailable)
 sentence-transformers
 torch --extra-index-url https://download.pytorch.org/whl/cpu
 

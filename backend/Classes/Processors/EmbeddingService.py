@@ -4,9 +4,10 @@ from customisedLogs import CustomisedLogs
 
 from Classes.Processors.PostgresPool import PostgresPool
 
-# Lazy import holder — do NOT import sentence_transformers at startup.
-# Importing it pulls torch (~400MB) and OOMs the platform on boot.
+# Lazy holders — do NOT import heavy ML libs at startup. torch alone is ~400MB
+# and will OOM the platform before first request.
 SentenceTransformer = None  # type: ignore
+FastTextEmbedding = None  # type: ignore
 
 
 class EmbeddingService:
@@ -25,35 +26,61 @@ class EmbeddingService:
         self._load_error: str | None = None
 
     def _get_model(self):
-        global SentenceTransformer
+        global SentenceTransformer, FastTextEmbedding
         if self._model is not None:
             return self._model
         if self._load_error:
             return None
-        # Env kill-switch for low-memory hosts (set ENABLE_VECTOR=false to disable)
-        if (os.getenv("ENABLE_VECTOR") or "true").strip().lower() in ("false", "0", "no", "off"):
-            self._load_error = "vector disabled via ENABLE_VECTOR"
+        # Default OFF on hosted low-memory containers; set ENABLE_VECTOR=true to enable.
+        # Local dev can export ENABLE_VECTOR=true, but cloud stays lean until you opt in.
+        if (os.getenv("ENABLE_VECTOR") or "false").strip().lower() in ("false", "0", "no", "off", ""):
+            self._load_error = "vector disabled (set ENABLE_VECTOR=true to enable)"
             return None
-        if SentenceTransformer is None:
+        # Prefer fastembed (ONNX, ~100MB) over sentence_transformers (torch, ~400MB)
+        if FastTextEmbedding is None and SentenceTransformer is None:
             try:
-                from sentence_transformers import SentenceTransformer as _ST
+                from fastembed import TextEmbedding as _FE
 
-                SentenceTransformer = _ST  # type: ignore
-            except ImportError as exc:
-                self._load_error = f"sentence-transformers not installed: {exc}"
-                return None
+                FastTextEmbedding = _FE  # type: ignore
+            except ImportError:
+                pass
+            if FastTextEmbedding is None:
+                try:
+                    from sentence_transformers import SentenceTransformer as _ST
+
+                    SentenceTransformer = _ST  # type: ignore
+                except ImportError as exc:
+                    self._load_error = f"no embedding backend installed: {exc}"
+                    return None
+                except Exception as exc:
+                    self._load_error = str(exc)[:200]
+                    return None
+        # Try fastembed first (lighter)
+        if FastTextEmbedding is not None:
+            try:
+                self.logger.log(self.logger.Colors.yellow_500, "EMBED", "loading fastembed BAAI/bge-small-en-v1.5 (ONNX)...")
+                # BGE small is 384 dims, same as MiniLM, and runs without torch
+                self._model = FastTextEmbedding(model_name="BAAI/bge-small-en-v1.5")  # type: ignore
+                # Warmup to verify
+                list(self._model.embed("test"))  # type: ignore
+                self.logger.log(self.logger.Colors.green_800, "EMBED", "fastembed model ready")
+                return self._model
+            except Exception as exc:
+                self.logger.log(self.logger.Colors.yellow_500, "EMBED", f"fastembed failed, falling back to MiniLM: {exc}")
+                FastTextEmbedding = None  # type: ignore
+                # fall through to MiniLM
+        if SentenceTransformer is not None:
+            try:
+                self.logger.log(self.logger.Colors.yellow_500, "EMBED", f"loading {self.MODEL_NAME}...")
+                self._model = SentenceTransformer(self.MODEL_NAME)  # type: ignore
+                self.logger.log(self.logger.Colors.green_800, "EMBED", "model ready")
+                return self._model
             except Exception as exc:
                 self._load_error = str(exc)[:200]
+                self.logger.log(self.logger.Colors.red_500, "EMBED", f"model load failed: {exc}")
                 return None
-        try:
-            self.logger.log(self.logger.Colors.yellow_500, "EMBED", f"loading {self.MODEL_NAME}...")
-            self._model = SentenceTransformer(self.MODEL_NAME)  # type: ignore
-            self.logger.log(self.logger.Colors.green_800, "EMBED", "model ready")
-            return self._model
-        except Exception as exc:
-            self._load_error = str(exc)[:200]
-            self.logger.log(self.logger.Colors.red_500, "EMBED", f"model load failed: {exc}")
-            return None
+        self._load_error = "no embedding backend available"
+        return None
 
     def embed_text(self, text: str) -> List[float] | None:
         text = (text or "").strip()
@@ -63,9 +90,13 @@ class EmbeddingService:
         if model is None:
             return None
         try:
-            vec = model.encode(text, normalize_embeddings=True)
-            # SentenceTransformer returns numpy array
-            return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+            # fastembed vs sentence_transformers have different APIs
+            if hasattr(model, "embed"):
+                # fastembed: embed([text]) -> generator of lists
+                vec = list(model.embed([text]))[0]  # type: ignore
+                return list(vec) if not hasattr(vec, "tolist") else vec.tolist()  # type: ignore
+            vec = model.encode(text, normalize_embeddings=True)  # type: ignore
+            return vec.tolist() if hasattr(vec, "tolist") else list(vec)  # type: ignore
         except Exception as exc:
             self.logger.log(self.logger.Colors.red_500, "EMBED", f"encode failed: {exc}")
             return None
