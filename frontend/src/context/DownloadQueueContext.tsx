@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import toast from "react-hot-toast";
 import { saveOfflineSong, type OfflineSong } from "../utils/offlineDB";
 import { fetchSongById, prepareSong } from "../api/music";
+import { apiBaseURL } from "../api/client";
 import type { Track } from "../types";
 
 type JobStatus = "queued" | "downloading" | "done" | "error";
@@ -28,34 +29,45 @@ interface QueueState {
 
 const Ctx = createContext<QueueState | null>(null);
 
-async function resolveAudio(track: Track): Promise<{ url: string; id: string; track: Track }> {
-  let url = track.source;
+async function resolveAudio(track: Track): Promise<{ id: string; track: Track }> {
   let id = track.id;
   let resolved = track;
-  if (!url) {
+  // Ensure we have a real fetch ID (discovery rows have api-... placeholder)
+  if (!track.source || id.startsWith("api-")) {
     const pid = await prepareSong(track.title);
     const fetched = await fetchSongById(pid);
     if (!fetched.AUDIO_URL) throw new Error("No audio for offline save");
-    url = fetched.AUDIO_URL;
     id = fetched.ID;
     resolved = {
       ...track,
       id,
-      source: url,
+      source: fetched.AUDIO_URL,
       duration: fetched.DURATION || track.duration,
       image: fetched.THUMBNAIL || track.image,
     };
   }
-  return { url, id, track: resolved };
+  return { id, track: resolved };
 }
 
-async function fetchWithProgress(url: string, onBytes: (pct: number) => void): Promise<Blob> {
+async function fetchViaBackend(id: string, onBytes: (pct: number) => void): Promise<Blob> {
+  // CORS-friendly backend proxy — avoids googlevideo ACAO block and keeps
+  // the download on the same origin as the app.
+  const url = `${apiBaseURL}/api/offline-audio/${encodeURIComponent(id)}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  if (!res.ok) {
+    // Try to surface the backend's JSON error
+    let detail = `Download failed: ${res.status}`;
+    try {
+      const body = await res.clone().json();
+      if (body?.ERROR) detail = body.ERROR;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
   const len = Number(res.headers.get("content-length") || 0);
   const reader = res.body?.getReader();
   if (!reader || !len) {
-    // Fallback: no progress granularity
     const blob = await res.blob();
     onBytes(100);
     return blob;
@@ -88,19 +100,24 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   }, []);
 
+  // Keep a ref to the latest jobs so the processor loop never sees a stale closure
+  const jobsRef = useRef(jobs);
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
+
   const processQueue = useCallback(async () => {
     if (runningRef.current) return;
     runningRef.current = true;
     try {
-      // Find next queued job
-      let next: Job | undefined;
-      // eslint-disable-next-line no-constant-condition
-      while ((next = jobs.find((j) => j.status === "queued"))) {
+      while (true) {
+        const next = jobsRef.current.find((j) => j.status === "queued");
+        if (!next) break;
         const job = next;
         setJob(job.id, { status: "downloading", bytesProgress: 0 });
         try {
-          const { url, id, track } = await resolveAudio(job.track);
-          const blob = await fetchWithProgress(url, (pct) => setJob(job.id, { bytesProgress: pct }));
+          const { id, track } = await resolveAudio(job.track);
+          const blob = await fetchViaBackend(id, (pct) => setJob(job.id, { bytesProgress: pct }));
           const offline: OfflineSong = {
             id,
             title: track.title,
@@ -115,16 +132,20 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
           await saveOfflineSong(offline);
           setJob(job.id, { status: "done", bytesProgress: 100 });
         } catch (err) {
-          setJob(job.id, { status: "error", error: err instanceof Error ? err.message : "Failed" });
-          toast.error(`Offline failed: ${job.title} — ${err instanceof Error ? err.message : "error"}`);
+          const msg = err instanceof Error ? err.message : "Failed";
+          // Never retry a failed job — mark as error and move on
+          setJob(job.id, { status: "error", error: msg });
+          toast.error(`Offline failed: ${job.title} — ${msg}`);
+          // Small backoff before next so we don't hammer the backend
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
         }
-        // Small tick to let state settle before next
         await new Promise((r) => setTimeout(r, 120));
       }
     } finally {
       runningRef.current = false;
     }
-  }, [jobs, setJob]);
+  }, [setJob]);
 
   // Kick processor when jobs change
   useEffect(() => {

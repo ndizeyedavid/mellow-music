@@ -183,6 +183,60 @@ def _fetchAudio(songID: str):
     return StreamingResponse(song.fetch_data_from_stream(), media_type="audio/mpeg")
 
 
+@app.get("/api/offline-audio/{songID}")
+def _offlineAudioAPI(songID: str):
+    """
+    CORS-friendly audio proxy for offline downloads. Browsers can't fetch
+    googlevideo directly (no ACAO header), so the backend streams it with
+    proper CORS. Used only by the download queue, not normal playback.
+    """
+    try:
+        song = SongCache.get_song_data(songID)
+    except Exception as exc:
+        return {"ERROR": f"Fetch failed: {exc}"}
+    if song is None:
+        return {"ERROR": "Song not found"}
+    if getattr(song, "error", None) or not song.audio_url:
+        return {"ERROR": getattr(song, "error", None) or "No audio available"}
+
+    import requests
+
+    # Stream the remote googlevideo/CDN file through the backend so the
+    # browser sees CORS headers from *us*, not from googlevideo.
+    try:
+        upstream = requests.get(
+            song.audio_url,
+            stream=True,
+            timeout=30,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+        )
+        if upstream.status_code != 200:
+            return {"ERROR": f"Upstream audio fetch failed: {upstream.status_code}"}
+        # Preserve content-type/length when available, but always allow CORS (middleware adds ACAO)
+        media_type = upstream.headers.get("content-type", "audio/mpeg").split(";")[0].strip() or "audio/mpeg"
+        headers = {}
+        clen = upstream.headers.get("content-length")
+        if clen:
+            headers["content-length"] = clen
+        # Let the browser cache the proxied file for a bit (offline will save its own copy)
+        headers["cache-control"] = "private, max-age=3600"
+
+        def _gen():
+            try:
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                try:
+                    upstream.close()
+                except Exception:
+                    pass
+
+        return StreamingResponse(_gen(), media_type=media_type, headers=headers)
+    except Exception as exc:
+        return {"ERROR": f"Proxy failed: {exc}"}
+
+
 @app.get("/api/home")
 def _homeAPI() -> dict:
     results = SongCache.YTDLP.homepage(max_results_per_query=3, max_total=12, cache_ttl_seconds=300)
