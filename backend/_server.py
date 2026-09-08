@@ -267,20 +267,27 @@ def _searchAPI(q: str = Query(..., description="Search query string"), max_resul
     return {"results": [_yt_result_to_json(item) for item in SongCache.YTDLP.search(query, max_results=max_results, provider=engine)], "provider": engine}
 
 
-def _ntfy(topic: str, title: str, message: str, priority: str = "default", tags: str = "") -> None:
-    """Best-effort POST to ntfy.sh; never raises."""
-    topic = (topic or "").strip().strip("/")
+def _ntfy(topic: str, title: str, message: str, priority: str = "default", tags: str = "") -> dict:
+    """Best-effort POST to ntfy.sh; returns {delivered, status, error}."""
+    raw = (topic or "").strip()
+    # Allow full URL like https://ntfy.sh/my-topic — extract the topic.
+    if "ntfy.sh" in raw:
+        raw = raw.rstrip("/").split("/")[-1]
+    topic = raw.strip().strip("/")
     if not topic:
-        return
+        return {"delivered": False, "error": "empty topic"}
     try:
         import requests
 
         headers = {"Title": title, "Priority": priority}
         if tags:
             headers["Tags"] = tags
-        requests.post(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"), headers=headers, timeout=10)
-    except Exception:
-        pass
+        resp = requests.post(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"), headers=headers, timeout=10)
+        if 200 <= resp.status_code < 300:
+            return {"delivered": True, "status": resp.status_code}
+        return {"delivered": False, "status": resp.status_code, "error": resp.text[:200]}
+    except Exception as exc:
+        return {"delivered": False, "error": str(exc)[:200]}
 
 
 @app.get("/api/watchdog")
@@ -303,16 +310,16 @@ def _watchdogAPI() -> dict:
         error_detail = str(exc)[:200]
 
     if youtube_ok:
-        _ntfy(topic, "✅ Mellow OK - all is well", "YouTube proxy + cookies healthy. No intervention needed. ✅", priority="low", tags="white_check_mark")
-        return {"status": "ok", "youtube": "ok", "notified": bool(topic)}
-    _ntfy(
+        res = _ntfy(topic, "Mellow OK - all is well", "YouTube proxy + cookies healthy. No intervention needed. ✅", priority="default", tags="white_check_mark,tada")
+        return {"status": "ok", "youtube": "ok", "notified": res.get("delivered", False), "ntfy": res, "topic": topic or None}
+    res = _ntfy(
         topic,
-        "🚨 Mellow ALERT - YouTube down",
+        "Mellow ALERT - YouTube down",
         f"Proxy/cookie check failed: {error_detail or 'unknown error'}. Update YTDLP_PROXY or YT_COOKIES_B64 and redeploy. 🚨",
         priority="high",
         tags="rotating_light",
     )
-    return {"status": "degraded", "youtube": "down", "error": error_detail, "notified": bool(topic)}
+    return {"status": "degraded", "youtube": "down", "error": error_detail, "notified": res.get("delivered", False), "ntfy": res, "topic": topic or None}
 
 
 if __name__ == "__main__":
