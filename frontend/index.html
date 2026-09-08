@@ -1,19 +1,78 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mellow Music</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#171719" />
+  <meta name="background-color" content="#171719" />
+
+  <!-- Primary SEO -->
+  <title>Mellow Music — Community-first, ad-free music</title>
+  <meta name="title" content="Mellow Music — Community-first, ad-free music" />
+  <meta name="description"
+    content="Discover, play and save your mixes on Mellow Music. No logins, no paywalls, no ads — just music. Explore top tracks, genres and personalized mixes." />
+  <meta name="keywords" content="music, streaming, discover, playlists, mixes, Mellow Music, ad-free" />
+  <meta name="author" content="Mellow Music" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <link rel="canonical" href="https://themellowmusic.vercel.app/" />
+
+  <!-- Icons / PWA -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180x180.png" />
+  <link rel="mask-icon" href="/favicon.svg" color="#171719" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Mellow Music" />
+  <meta property="og:url" content="https://themellowmusic.vercel.app/" />
+  <meta property="og:title" content="Mellow Music — Community-first, ad-free music" />
+  <meta property="og:description"
+    content="Discover, play and save your mixes. No logins, no paywalls, no ads — just music." />
+  <meta property="og:image" content="https://themellowmusic.vercel.app/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Mellow Music logo on dark background" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Mellow Music — Community-first, ad-free music" />
+  <meta name="twitter:description"
+    content="Discover, play and save your mixes. No logins, no paywalls, no ads — just music." />
+  <meta name="twitter:image" content="https://themellowmusic.vercel.app/og-image.png" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Structured data -->
+  <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "MusicGroup",
+        "name": "Mellow Music",
+        "url": "https://themellowmusic.vercel.app/",
+        "logo": "https://themellowmusic.vercel.app/icons/icon-512x512.png",
+        "image": "https://themellowmusic.vercel.app/og-image.png",
+        "description": "Community-first, ad-free music — discover, play and save your mixes.",
+        "sameAs": []
+      }
+    </script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+  <noscript>
+    <div
+      style="display:flex;min-height:100vh;align-items:center;justify-content:center;background:#171719;color:#fff;font-family:Inter,system-ui;padding:24px;text-align:center">
+      <p>Mellow Music needs JavaScript to play — please enable it and reload.</p>
+    </div>
+  </noscript>
+</body>
+
 </html>
