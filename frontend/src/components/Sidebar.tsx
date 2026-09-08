@@ -71,6 +71,7 @@ const collectionLinks: Array<{ label: string; to: string; icon: IconName }> = [
   { label: "Playlists", to: "/playlists", icon: "playlists" },
   { label: "Liked Songs", to: "/liked", icon: "like" },
   { label: "My Mix", to: "/mix", icon: "mixes" },
+  { label: "Downloads", to: "/downloads", icon: "downloads" },
   { label: "Albums", to: "/albums", icon: "albums" },
   { label: "History", to: "/tracks", icon: "tracks" },
   { label: "Artists", to: "/artists", icon: "artists" },

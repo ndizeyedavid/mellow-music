@@ -6,6 +6,7 @@ import {
   MdArrowUpward,
   MdBookmarkAdd,
   MdClose,
+  MdCloudDownload,
   MdDeleteOutline,
   MdEdit,
   MdPlayArrow,
@@ -18,6 +19,7 @@ import { usePlayer } from "../context/PlayerContext";
 import { playlistCover, resolvedToSnapshot } from "../utils/playlists";
 import { QueueMenuButton } from "../components/QueueMenu";
 import { resolveSavedTrack } from "../utils/playlists";
+import { useDownloadQueue } from "../context/DownloadQueueContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { usePlayDiscovery, type ResolvableItem } from "../hooks/usePlayDiscovery";
@@ -54,6 +56,7 @@ function ApiPlaylistDetail({ id }: { id: string }) {
   const { currentTrack, isPlaying } = usePlayer();
   const { playItems, isResolving, resolvingKey } = usePlayDiscovery();
   const { createPlaylist, addTrack } = usePlaylists();
+  const { enqueue } = useDownloadQueue();
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +161,27 @@ function ApiPlaylistDetail({ id }: { id: string }) {
     }
   };
 
+  const downloadFirstFive = () => {
+    const toSave = tracks.slice(0, 5).map((d) => ({
+      id: d.id || `disc-${d.title}`,
+      title: d.title || "Unknown",
+      artist: d.artist || "Unknown",
+      artistId: `api-artist-${d.artist}`,
+      album: "Mellow Discovery",
+      albumId: "api-discovery",
+      image: d.thumbnail || "",
+      source: "",
+      duration: d.duration || 0,
+      popularity: 50,
+      plays: "",
+      releaseDate: "",
+      genre: "Discovery",
+      lyrics: [],
+      credits: { writers: [], producers: [], label: "" },
+    }));
+    enqueue(toSave as never[]);
+  };
+
   return (
     <div className="px-6 pt-6">
       <div className="flex flex-col gap-6 md:flex-row md:items-end">
@@ -212,6 +236,15 @@ function ApiPlaylistDetail({ id }: { id: string }) {
             {saving > 0 ? `Saving ${saving}/${tracks.length}…` : "Save playlist"}
           </button>
         )}
+        <button
+          type="button"
+          onClick={downloadFirstFive}
+          disabled={tracks.length === 0}
+          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-elevated px-5 py-3 text-[14px]/[20px] font-semibold text-fg transition-colors hover:bg-white/10 disabled:opacity-40"
+          title="Save first 5 for offline"
+        >
+          <MdCloudDownload size={18} /> Download 5 offline
+        </button>
       </div>
 
       <ApiTrackList
