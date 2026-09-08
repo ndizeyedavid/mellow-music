@@ -4,12 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mellow-music-backend"
-version = "1.0.0"
+version = "1.0.1"
 description = "Community-first music backend (FastAPI) for Mellow Music"
 requires-python = "==3.13.*"
 dependencies = [
     "fastapi[standard]",
     "mysql-connector-python==26.7.0",
+    "psycopg[binary]",
+    "pgvector",
+    "sentence-transformers",
+    "torch",
     "yt-dlp>=2026.8.19",
     "spotipy==2.26.0",
     "customisedLogs==2.0.3",
