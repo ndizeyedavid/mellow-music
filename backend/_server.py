@@ -335,11 +335,11 @@ def _watchdogAPI() -> dict:
         error_detail = str(exc)[:200]
 
     if youtube_ok:
-        _ntfy(topic, "Mellow OK — all is well", "YouTube proxy + cookies healthy. No intervention needed. ✅", priority="low", tags="white_check_mark")
+        _ntfy(topic, "✅ Mellow OK - all is well", "YouTube proxy + cookies healthy. No intervention needed. ✅", priority="low", tags="white_check_mark")
         return {"status": "ok", "youtube": "ok", "notified": bool(topic)}
     _ntfy(
         topic,
-        "Mellow ALERT — YouTube down",
+        "🚨 Mellow ALERT - YouTube down",
         f"Proxy/cookie check failed: {error_detail or 'unknown error'}. Update YTDLP_PROXY or YT_COOKIES_B64 and redeploy. 🚨",
         priority="high",
         tags="rotating_light",
