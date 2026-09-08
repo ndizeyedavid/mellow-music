@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import NProgress from "nprogress";
 import { Sidebar } from "./components/Sidebar";
@@ -8,6 +8,7 @@ import { MobileNav } from "./components/MobileNav";
 import { BottomPlayer } from "./components/BottomPlayer";
 import { FullscreenPlayer } from "./components/FullscreenPlayer";
 import { ArtworkPopup } from "./components/ArtworkPopup";
+import { OfflineBanner } from "./components/OfflineBanner";
 import {
   NowPlayingPanel,
   NowPlayingPanelContent,
@@ -17,6 +18,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PlayerProvider } from "./context/PlayerContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { LibraryProvider } from "./context/LibraryContext";
+import { DownloadQueueProvider } from "./context/DownloadQueueContext";
+import { GlobalDownloadBar } from "./components/GlobalDownloadBar";
 
 const lazyPage = (
   factory: () => Promise<{ [key: string]: unknown }>,
@@ -56,6 +59,10 @@ const ArtistDetailPage = lazyPage(
 const SongPage = lazyPage(() => import("./pages/SongPage"), "SongPage");
 const LikedPage = lazyPage(() => import("./pages/LikedPage"), "LikedPage");
 const MixPage = lazyPage(() => import("./pages/MixPage"), "MixPage");
+const DownloadsPage = lazyPage(
+  () => import("./pages/DownloadsPage"),
+  "DownloadsPage",
+);
 const NotFoundPage = lazyPage(
   () => import("./pages/NotFoundPage"),
   "NotFoundPage",
@@ -68,6 +75,27 @@ function AppShell() {
   const [artOpen, setArtOpen] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Offline takes you to downloads — show only what's saved until back online.
+  const onlineRef = useRef(navigator.onLine);
+  useEffect(() => {
+    const off = () => {
+      onlineRef.current = false;
+      if (location.pathname !== "/downloads") navigate("/downloads");
+    };
+    const on = () => {
+      onlineRef.current = true;
+    };
+    window.addEventListener("offline", off);
+    window.addEventListener("online", on);
+    // If we mount already offline (e.g. reload without internet)
+    if (!navigator.onLine && location.pathname !== "/downloads") navigate("/downloads");
+    return () => {
+      window.removeEventListener("offline", off);
+      window.removeEventListener("online", on);
+    };
+  }, [location.pathname, navigate]);
 
   // Reset scroll on navigation.
   useEffect(() => {
@@ -92,6 +120,8 @@ function AppShell() {
       >
         Skip to content
       </a>
+      <OfflineBanner />
+      <GlobalDownloadBar />
       <Sidebar />
       <MobileNav open={navOpen} onClose={() => setNavOpen(false)} />
 
@@ -121,6 +151,7 @@ function AppShell() {
               <Route path="/song/:id" element={<SongPage />} />
               <Route path="/liked" element={<LikedPage />} />
               <Route path="/mix" element={<MixPage />} />
+              <Route path="/downloads" element={<DownloadsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
@@ -186,9 +217,11 @@ export default function App() {
       <ErrorBoundary>
         <PlaylistProvider>
           <LibraryProvider>
-            <PlayerProvider>
-              <AppShell />
-            </PlayerProvider>
+            <DownloadQueueProvider>
+              <PlayerProvider>
+                <AppShell />
+              </PlayerProvider>
+            </DownloadQueueProvider>
           </LibraryProvider>
         </PlaylistProvider>
       </ErrorBoundary>

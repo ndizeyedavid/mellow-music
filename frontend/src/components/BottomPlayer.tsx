@@ -116,7 +116,7 @@ function MenuItem({
   );
 }
 
-/** Options dropdown: add to playlist + share + crossfade + autoplay. */
+/** Options dropdown: add to playlist + share + crossfade + autoplay + offline save. */
 function OptionsMenu({ track }: { track: Track }) {
   const [copied, setCopied] = useState(false);
   const { crossfade, setCrossfade, autoplay, toggleAutoplay } = usePlayer();
@@ -138,6 +138,28 @@ function OptionsMenu({ track }: { track: Track }) {
         <span className="text-[14px]/[20px] font-medium text-fg">
           Add to playlist
         </span>
+      </div>
+      <div className="flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-white/5">
+        <span className="flex h-5 w-5 items-center justify-center text-fg">
+          <MdQueueMusic size={16} />
+        </span>
+        <button
+          type="button"
+          onClick={async () => {
+            const { downloadTrackForOffline } = await import("../hooks/useOfflineDownloads");
+            try {
+              await downloadTrackForOffline(track);
+              const { default: toast } = await import("react-hot-toast");
+              toast.success(`Saved "${track.title}" for offline`);
+            } catch (err) {
+              const { default: toast } = await import("react-hot-toast");
+              toast.error(err instanceof Error ? err.message : "Offline save failed");
+            }
+          }}
+          className="cursor-pointer text-left text-[14px]/[20px] font-medium text-fg hover:text-accent"
+        >
+          Download for offline
+        </button>
       </div>
       <MenuItem active={copied} onClick={handleShare}>
         <span className="w-5 text-center">{copied ? "✓" : "↗"}</span>

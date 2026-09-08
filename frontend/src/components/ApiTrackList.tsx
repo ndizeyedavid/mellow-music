@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { SafeImage } from "./SafeImage";
 import { AddDiscoveryButton } from "./AddToPlaylist";
 import { QueueMenuButton } from "./QueueMenu";
+import { OfflineDownloadButton } from "./OfflineDownloadButton";
 import { resolveDiscoveryItem } from "../api/music";
 import type { ApiDiscoveryItem } from "../api/music";
 import { formatTime } from "../utils/format";
@@ -92,7 +93,8 @@ export function ApiTrackList({
                 ? formatTime(item.duration)
                 : "--:--"}
               {enableAdd && (
-                <span className="hidden group-hover:inline-flex">
+                <span className="hidden items-center group-hover:inline-flex">
+                  <OfflineDownloadButton track={item} />
                   <AddDiscoveryButton items={items} index={index} />
                   <QueueMenuButton
                     label={title}
