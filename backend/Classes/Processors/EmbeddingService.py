@@ -1,12 +1,12 @@
+import os
 from typing import List
 from customisedLogs import CustomisedLogs
 
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    SentenceTransformer = None  # type: ignore
-
 from Classes.Processors.PostgresPool import PostgresPool
+
+# Lazy import holder — do NOT import sentence_transformers at startup.
+# Importing it pulls torch (~400MB) and OOMs the platform on boot.
+SentenceTransformer = None  # type: ignore
 
 
 class EmbeddingService:
@@ -25,16 +25,29 @@ class EmbeddingService:
         self._load_error: str | None = None
 
     def _get_model(self):
+        global SentenceTransformer
         if self._model is not None:
             return self._model
         if self._load_error:
             return None
-        if SentenceTransformer is None:
-            self._load_error = "sentence-transformers not installed"
+        # Env kill-switch for low-memory hosts (set ENABLE_VECTOR=false to disable)
+        if (os.getenv("ENABLE_VECTOR") or "true").strip().lower() in ("false", "0", "no", "off"):
+            self._load_error = "vector disabled via ENABLE_VECTOR"
             return None
+        if SentenceTransformer is None:
+            try:
+                from sentence_transformers import SentenceTransformer as _ST
+
+                SentenceTransformer = _ST  # type: ignore
+            except ImportError as exc:
+                self._load_error = f"sentence-transformers not installed: {exc}"
+                return None
+            except Exception as exc:
+                self._load_error = str(exc)[:200]
+                return None
         try:
             self.logger.log(self.logger.Colors.yellow_500, "EMBED", f"loading {self.MODEL_NAME}...")
-            self._model = SentenceTransformer(self.MODEL_NAME)
+            self._model = SentenceTransformer(self.MODEL_NAME)  # type: ignore
             self.logger.log(self.logger.Colors.green_800, "EMBED", "model ready")
             return self._model
         except Exception as exc:

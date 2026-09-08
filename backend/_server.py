@@ -85,7 +85,23 @@ for _folder in (_Folders.temp, _Folders.autoTemp):
 SQLConn = DBHolder(Logger)
 URLHandler = URLHandler()
 SongCache = SongCache(SQLConn.useDB(), Logger, URLHandler)
-Embedder = EmbeddingService(SQLConn.useDB(), Logger)
+try:
+    Embedder = EmbeddingService(SQLConn.useDB(), Logger)
+except Exception as exc:
+    Logger.log(Logger.Colors.yellow_500, "startup", f"Embedder disabled: {exc}")
+    Embedder = None  # type: ignore
+    # Fallback stub that returns empty results so vector endpoints degrade gracefully
+    class _NoopEmbedder:
+        def record_taste_event(self, *a, **k):
+            return False
+
+        def recommend_for_anonymous(self, *a, **k):
+            return []
+
+        def ensure_embedding(self, *a, **k):
+            return False
+
+    Embedder = _NoopEmbedder()  # type: ignore
 Curator = MixCurator(Logger)
 
 
