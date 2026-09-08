@@ -1,7 +1,16 @@
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Thread, Event
 from time import sleep
+
+def _ensure_aware(dt: datetime | None) -> datetime:
+    if dt is None:
+        return datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 from customisedLogs import CustomisedLogs
@@ -90,8 +99,8 @@ class SongCache:
 
     def __finish_refresh(self, song:SongData) -> None:
         """Persist a refreshed audio URL and release any waiter."""
-        song.expiry = datetime.now() + timedelta(hours=5)
-        song.last_fetched_at = datetime.now()
+        song.expiry = _now() + timedelta(hours=5)
+        song.last_fetched_at = _now()
         try:
             self.SQLConn.execute(f"UPDATE {DBTables.SONGS.TABLE_NAME} SET {DBTables.SONGS.LAST_UPDATED}=NOW(), {DBTables.SONGS.AUDIO_URL}=? WHERE {DBTables.SONGS.SONG_ID}=?", [song.audio_url, song.song_id])
         except Exception:
@@ -300,7 +309,7 @@ class SongCache:
             except:
                 song.spotify = ""
 
-        song.expiry = datetime.now() + timedelta(hours=5)
+        song.expiry = _now() + timedelta(hours=5)
         try:
             self.__save_to_db(song)
         except Exception as exc:
@@ -353,7 +362,7 @@ class SongCache:
             song.duration = fetched[DBTables.SONGS.DURATION]
             song.audio_url = fetched[DBTables.SONGS.AUDIO_URL]
             song.thumbnail = fetched[DBTables.SONGS.THUMBNAIL]
-            song.expiry = fetched[DBTables.SONGS.LAST_UPDATED] + timedelta(hours=5)
+            song.expiry = _ensure_aware(fetched[DBTables.SONGS.LAST_UPDATED]) + timedelta(hours=5)
             if not asRepeat: self.__renew_expiry(song, None)
             Thread(target=self.__remove_cache, args=(song,)).start()
             if song.waiter is not None:
@@ -369,7 +378,7 @@ class SongCache:
         :param seconds: time to wait in seconds
         :return:
         """
-        while (datetime.now() - song.last_fetched_at).total_seconds() < seconds+5: sleep(1)
+        while (_now() - _ensure_aware(song.last_fetched_at)).total_seconds() < seconds+5: sleep(1)
         if song.song_id in self.cache:
             del self.cache[song.song_id]
 
@@ -383,9 +392,9 @@ class SongCache:
         """
         if url:
             song.audio_url = url
-            song.expiry = datetime.now()+timedelta(hours=5)
-            song.last_fetched_at = datetime.now()
-        elif datetime.now() > song.expiry:
+            song.expiry = _now()+timedelta(hours=5)
+            song.last_fetched_at = _now()
+        elif _now() > _ensure_aware(song.expiry):
             marker = song.yt or ""
             if marker.startswith("preview:"):
                 self.__refresh_preview(song)
@@ -440,7 +449,7 @@ class SongCache:
                 song = song.repeat_for
                 if song.waiter is not None:
                     song.waiter.wait(timeout=180)
-            song.last_fetched_at = datetime.now()
+            song.last_fetched_at = _now()
             if song.error is None:
                 try:
                     self.__renew_expiry(song, None)

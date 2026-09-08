@@ -1,7 +1,14 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from threading import Condition, Lock, Thread
 from typing import Generator
+
+def _ensure_aware(dt: datetime | None) -> datetime:
+    if dt is None:
+        return datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 import requests
 
@@ -19,9 +26,9 @@ class SongData:
         self.duration:float|int = 0
         self.audio_url:str = ""
         self.thumbnail:str = ""
-        self.expiry:datetime = datetime.now()
+        self.expiry:datetime = datetime.now(timezone.utc)
         self.lyrics:str = "No Lyrics LOL :)"
-        self.last_fetched_at:datetime = datetime.now()
+        self.last_fetched_at:datetime = datetime.now(timezone.utc)
         self.repeat_for: SongData | None = None
         self.waiter = None
         # Set when extraction fails (e.g. YouTube bot-check) so API
