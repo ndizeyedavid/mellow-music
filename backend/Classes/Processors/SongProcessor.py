@@ -5,7 +5,7 @@ from time import sleep
 
 
 from customisedLogs import CustomisedLogs
-from Classes.Processors.MySQLPool import MySQLPool
+from Classes.Processors.PostgresPool import PostgresPool
 from randomisedString import RandomisedString
 
 
@@ -21,13 +21,14 @@ class SongCache:
     """
     Processor to collect, renew and handle local and DB caches for all song data
     """
-    def __init__(self, SQLConn:MySQLPool, Logger:CustomisedLogs, URLHandler:URLHandler):
+    def __init__(self, SQLConn:PostgresPool, Logger:CustomisedLogs, URLHandler:URLHandler):
         self.SQLConn = SQLConn
         self.logger = Logger
         self.cache:dict[str, SongData] = {}
         self.YTDLP = YTDLP(self.logger)
         self.SpotifyAPICollection = SpotifyAPICollection(self.SQLConn)
         self.URLHandler = URLHandler
+        self._embedder = None
 
     @staticmethod
     def __db_value(value):
@@ -305,10 +306,29 @@ class SongCache:
         except Exception as exc:
             self.__fail_fetch(song, f"Could not save song: {exc}")
             return
+        try:
+            Thread(target=self.__ensure_embedding, args=(song.song_id, song.song_name), daemon=True).start()
+        except Exception:
+            pass
         if song.waiter is not None:
             song.waiter.set()
             song.waiter = None
         Thread(target=self.__remove_cache, args=(song,)).start()
+
+    def __ensure_embedding(self, song_id: str, song_name: str):
+        try:
+            if self._embedder is None:
+                from Classes.Processors.EmbeddingService import EmbeddingService
+
+                self._embedder = EmbeddingService(self.SQLConn, self.logger)
+            title = song_name
+            artist = ""
+            if " - " in song_name:
+                # song_name often is "Title - Artist" from YT; keep full for embedding
+                title = song_name
+            self._embedder.ensure_embedding(song_id, title, artist)
+        except Exception:
+            pass
 
 
     def __cache_from_db(self, songID:str, asRepeat) -> SongData | None:

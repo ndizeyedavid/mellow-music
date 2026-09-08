@@ -26,16 +26,17 @@ class CoreValues:
 
 
 class DBSecrets:
-    # Local-development defaults. Production uses DB_HOST/DB_PORT/DB_USER/
-    # DB_PASSWORD/DB_NAME (or DB_HOSTS) — see DBHolder, which prefers env.
+    # Vector branch: Postgres + pgvector clean slate.
+    # Production uses PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE (or PGSSLMODE);
+    # DB_* vars are kept as fallback. See DBHolder.
     DBHosts = [
         host.strip()
-        for host in _env("DB_HOSTS", "localhost,bp-desktop").split(",")
+        for host in (_env("PGHOST", "") or _env("DB_HOSTS", "localhost")).split(",")
         if host.strip()
-    ]
-    DBUser = _env("DB_USER", "root")
-    DBPassword = _env("DB_PASSWORD", "")
-    DBName = _env("DB_NAME", "musicapi")
+    ] or ["localhost"]
+    DBUser = (_env("PGUSER", "") or _env("DB_USER", "") or "postgres").strip() or "postgres"
+    DBPassword = (_env("PGPASSWORD", "") or _env("DB_PASSWORD", "") or "mellow@123").strip()
+    DBName = (_env("PGDATABASE", "") or _env("DB_NAME", "") or "mellow_music").strip() or "mellow_music"
 
 
 class RequiredFiles:
@@ -49,6 +50,8 @@ class RequiredFiles:
         "Classes/Processors/DBHolder.py",
         "Classes/Processors/FileCache.py",
         "Classes/Processors/MySQLPool.py",
+        "Classes/Processors/PostgresPool.py",
+        "Classes/Processors/EmbeddingService.py",
         "Classes/Processors/SongData.py",
         "Classes/Processors/SongProcessor.py",
         "Classes/Processors/SpotifyAPI.py",
@@ -57,4 +60,5 @@ class RequiredFiles:
         "Classes/Processors/YTDLP.py",
         "Hidden/dynamicWebsite.py",
         "Hidden/Secrets.py",
+        "schema.sql",
     ]

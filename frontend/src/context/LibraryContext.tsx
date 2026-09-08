@@ -12,6 +12,8 @@ import {
   recordAffLike,
   recordAffSave,
 } from "../utils/affinity";
+import { getAnonymousId } from "../utils/anonymous";
+import { sendTasteEvent } from "../api/taste";
 
 interface LibraryContextValue {
   likedSongs: string[];
@@ -53,6 +55,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       const adding = !likedSongs.includes(id);
       setLikedSongs((prev) => toggleInList(prev, id));
       if (artist) recordAffLike(artist, adding);
+      sendTasteEvent(getAnonymousId(), id, adding ? "like" : "skip");
       // Confirm with a top-center toast (View jumps to Liked Songs).
       if (title) {
         if (adding) {
@@ -83,6 +86,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       const adding = !followedArtists.includes(id);
       setFollowedArtists((prev) => toggleInList(prev, id));
       if (name) recordAffFollow(name, adding);
+      sendTasteEvent(getAnonymousId(), id, adding ? "follow" : "skip");
     },
     [setFollowedArtists, followedArtists],
   );
@@ -91,6 +95,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       const adding = !savedAlbums.includes(id);
       setSavedAlbums((prev) => toggleInList(prev, id));
       if (artist) recordAffSave(artist, adding);
+      sendTasteEvent(getAnonymousId(), id, adding ? "save" : "skip");
     },
     [setSavedAlbums, savedAlbums],
   );

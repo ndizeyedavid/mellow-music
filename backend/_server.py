@@ -51,6 +51,7 @@ _load_env_file(os.path.join(os.path.dirname(BACKEND_DIR), ".env"))
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from customisedLogs import CustomisedLogs
 
@@ -58,6 +59,7 @@ from Classes.Holders.FileInvolved import Folders
 from Classes.Processors.DBHolder import DBHolder
 from Classes.Processors.URLHandler import URLHandler
 from Classes.Processors.SongProcessor import SongCache
+from Classes.Processors.EmbeddingService import EmbeddingService
 from Classes.Processors.MixCurator import MixCurator
 from Hidden.Secrets import CoreValues
 
@@ -72,7 +74,9 @@ app = FastAPI(
 Logger = CustomisedLogs()
 
 # Runtime-writable folders (git-ignored, may not exist on fresh deploys).
-for _folder in (Folders.temp, Folders.autoTemp):
+from Classes.Holders.FileInvolved import Folders as _Folders
+
+for _folder in (_Folders.temp, _Folders.autoTemp):
     try:
         _folder.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -81,6 +85,7 @@ for _folder in (Folders.temp, Folders.autoTemp):
 SQLConn = DBHolder(Logger)
 URLHandler = URLHandler()
 SongCache = SongCache(SQLConn.useDB(), Logger, URLHandler)
+Embedder = EmbeddingService(SQLConn.useDB(), Logger)
 Curator = MixCurator(Logger)
 
 
@@ -97,7 +102,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -297,6 +302,56 @@ def _searchAPI(q: str = Query(..., description="Search query string"), max_resul
     if engine not in ("auto", "deezer", "itunes", "youtube"):
         engine = "auto"
     return {"results": [_yt_result_to_json(item) for item in SongCache.YTDLP.search(query, max_results=max_results, provider=engine)], "provider": engine}
+
+
+class TasteEventIn(BaseModel):
+    anonymous_id: str
+    song_id: str
+    event_type: str  # play, complete, skip, like, follow, save, playlist_add
+
+
+@app.post("/api/taste/event")
+def _tasteEventAPI(body: TasteEventIn) -> dict:
+    ok = Embedder.record_taste_event(body.anonymous_id.strip(), body.song_id.strip(), body.event_type.strip().lower())
+    return {"ok": ok}
+
+
+@app.get("/api/recommend/vector")
+def _vectorRecommendAPI(
+    anonymous_id: str = Query(..., description="Anonymous mellow_id from localStorage"),
+    limit: int = Query(10, ge=1, le=20),
+    exclude: str = Query("", description="Comma-separated song_ids to exclude"),
+) -> dict:
+    anon = (anonymous_id or "").strip()
+    if not anon:
+        return {"results": []}
+    exclude_ids = [s.strip() for s in exclude.split(",") if s.strip()]
+    results = Embedder.recommend_for_anonymous(anon, exclude_ids=exclude_ids, limit=limit)
+    # Normalize to discovery shape for frontend playItems
+    normalized = []
+    for r in results:
+        real = r.get("real_name") or "Unknown Title"
+        # real_name may be "Title - Artist" (from yt) — split for display
+        title, artist = real, "Unknown Artist"
+        if " - " in real:
+            # Heuristic: last " - " separates title and artist for many yt titles
+            # e.g. "Blinding Lights - The Weeknd" -> title "Blinding Lights", artist "The Weeknd"
+            # For "The Weeknd - Blinding Lights", this will swap but still shows something
+            parts = real.rsplit(" - ", 1)
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                title, artist = parts[0].strip(), parts[1].strip()
+        normalized.append(
+            {
+                "id": r.get("song_id"),
+                "title": title,
+                "artist": artist,
+                "thumbnail": r.get("thumbnail") or "",
+                "duration": r.get("duration") or 0,
+                "url": "",
+                "score": r.get("score", 0),
+            }
+        )
+    return {"results": normalized}
 
 
 def _ntfy(topic: str, title: str, message: str, priority: str = "default", tags: str = "") -> dict:
