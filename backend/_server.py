@@ -299,6 +299,54 @@ def _searchAPI(q: str = Query(..., description="Search query string"), max_resul
     return {"results": [_yt_result_to_json(item) for item in SongCache.YTDLP.search(query, max_results=max_results, provider=engine)], "provider": engine}
 
 
+def _ntfy(topic: str, title: str, message: str, priority: str = "default", tags: str = "") -> None:
+    """Best-effort POST to ntfy.sh; never raises."""
+    topic = (topic or "").strip().strip("/")
+    if not topic:
+        return
+    try:
+        import requests
+
+        headers = {"Title": title, "Priority": priority}
+        if tags:
+            headers["Tags"] = tags
+        requests.post(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"), headers=headers, timeout=10)
+    except Exception:
+        pass
+
+
+@app.get("/api/watchdog")
+def _watchdogAPI() -> dict:
+    """
+    Daily heartbeat for cron-job.org: checks YouTube via yt-dlp and notifies
+    via ntfy.sh. Configure NTFY_TOPIC (e.g. mellow-music-david-xyz789) in
+    environment; cron-job.org hits this endpoint daily at 12:00. Returns
+    status and always sends a notification (good day + bad day).
+    """
+    topic = (os.getenv("NTFY_TOPIC") or "").strip().strip("/")
+    youtube_ok = False
+    error_detail = ""
+    try:
+        results = SongCache.YTDLP.search("Blaze Of Glory", max_results=1, provider="youtube")
+        youtube_ok = len(results) > 0
+        if not youtube_ok:
+            error_detail = "YouTube search returned 0 results (proxy/cookie may be down)"
+    except Exception as exc:
+        error_detail = str(exc)[:200]
+
+    if youtube_ok:
+        _ntfy(topic, "Mellow OK — all is well", "YouTube proxy + cookies healthy. No intervention needed. ✅", priority="low", tags="white_check_mark")
+        return {"status": "ok", "youtube": "ok", "notified": bool(topic)}
+    _ntfy(
+        topic,
+        "Mellow ALERT — YouTube down",
+        f"Proxy/cookie check failed: {error_detail or 'unknown error'}. Update YTDLP_PROXY or YT_COOKIES_B64 and redeploy. 🚨",
+        priority="high",
+        tags="rotating_light",
+    )
+    return {"status": "degraded", "youtube": "down", "error": error_detail, "notified": bool(topic)}
+
+
 if __name__ == "__main__":
     import uvicorn
 
