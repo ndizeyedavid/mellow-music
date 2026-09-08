@@ -11,6 +11,8 @@ import {
 } from "../utils/playlists";
 import { usePlaylists } from "../context/PlaylistContext";
 import { recordAffPlaylistAdd } from "../utils/affinity";
+import { getAnonymousId } from "../utils/anonymous";
+import { sendTasteEvent } from "../api/taste";
 import { resolveDiscoveryItem, type ApiDiscoveryItem } from "../api/music";
 import type { Track } from "../types";
 
@@ -153,6 +155,7 @@ function AddShell({
       setOpen(false);
       if (added) {
         recordAffPlaylistAdd(snapshot.title, snapshot.artist);
+        sendTasteEvent(getAnonymousId(), snapshot.trackId, "playlist_add");
         setDone(true);
         window.setTimeout(() => setDone(false), 1600);
         toast.success(

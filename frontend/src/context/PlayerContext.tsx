@@ -14,6 +14,8 @@ import {
   recordAffPlay,
   recordAffSkip,
 } from "../utils/affinity";
+import { getAnonymousId } from "../utils/anonymous";
+import { fetchVectorRecommend, sendTasteEvent } from "../api/taste";
 import { usePlaylists } from "./PlaylistContext";
 import { buildTaste } from "../utils/taste";
 import type { Track } from "../types";
@@ -55,19 +57,53 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const history = useHistory();
   const { playlists } = usePlaylists();
 
-  // Autoplay continuation: taste-seeded mix appended past the queue end.
-  // Returns the grown queue (urgent first track) plus follow-up items,
-  // or null to let the player stop cleanly.
+  // Autoplay continuation: vector taste first (blazing fast ANN), fallback to mix.
   const continueQueueEnd = useCallback(
     async (
       queue: Track[],
-    ): Promise<{      tracks: Track[];
-      startIndex: number;
-      rest: ApiDiscoveryItem[];
-    } | null> => {
+    ): Promise<{ tracks: Track[]; startIndex: number; rest: ApiDiscoveryItem[] } | null> => {
+      const anon = getAnonymousId();
+      const excludeIds = queue.map((t) => t.id);
+      const excludeTitles = [...queue.map((t) => t.title)];
+      // Try vector ANN first (real-time, <50ms, no LLM)
+      try {
+        const vectorResults = await fetchVectorRecommend(anon, excludeIds, 10);
+        if (vectorResults.length > 0) {
+          // Vector results may have audio_url already (from songs table) — if so, use directly, else resolve
+          const first = vectorResults[0] as ApiDiscoveryItem & { audio_url?: string };
+          let firstTrack: Track;
+          if ((first as any).audio_url) {
+            // Directly playable from DB (no yt-dlp needed)
+            firstTrack = {
+              id: first.id as string,
+              title: first.title as string,
+              artist: (first.artist as string) || "Unknown Artist",
+              artistId: `api-artist-${first.artist}`,
+              album: "Mellow Discovery",
+              albumId: "api-discovery",
+              image: first.thumbnail || "",
+              source: (first as any).audio_url,
+              duration: (first.duration as number) || 0,
+              popularity: 50,
+              plays: "",
+              releaseDate: "",
+              genre: "Discovery",
+              lyrics: [],
+              credits: { writers: [], producers: [], label: "" },
+            };
+          } else {
+            firstTrack = await resolveDiscoveryItem(first);
+          }
+          toast.success(`Autoplay — vector pick for you`, { id: `autoplay-vector-${Date.now()}` });
+          return { tracks: [...queue, firstTrack], startIndex: queue.length, rest: vectorResults.slice(1) as ApiDiscoveryItem[] };
+        }
+      } catch {
+        // fall through to mix
+      }
+      // Fallback: taste-seeded mix (Groq curated)
       const taste = buildTaste(history, playlists);
       if (taste.artists.length === 0) return null;
-      const exclude = [...taste.exclude, ...queue.map((t) => t.title)];
+      const exclude = [...taste.exclude, ...excludeTitles];
       let mix;
       try {
         mix = await getMix(taste.artists, exclude, 10);
@@ -83,24 +119,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       } catch {
         return null;
       }
-      toast.success(`Autoplay — kept going with ${mix.name || "your mix"}`, {
-        id: `autoplay-${mix.mix_id || Date.now()}`,
-      });
-      return {
-        tracks: [...queue, first],
-        startIndex: queue.length,
-        rest: fresh.slice(1),
-      };
+      toast.success(`Autoplay — kept going with ${mix.name || "your mix"}`, { id: `autoplay-${mix.mix_id || Date.now()}` });
+      return { tracks: [...queue, first], startIndex: queue.length, rest: fresh.slice(1) };
     },
     [history, playlists],
   );
 
-  // Player signal handlers: completions and skips feed affinity.
+  // Player signal handlers: completions and skips feed affinity + backend vector taste.
   const handleTrackEnded = useCallback((track: Track) => {
-    if (track.source) recordAffComplete(track.title, track.artist);
+    if (track.source) {
+      recordAffComplete(track.title, track.artist);
+      sendTasteEvent(getAnonymousId(), track.id, "complete");
+    }
   }, []);
   const handleTrackSkipped = useCallback((track: Track) => {
-    if (track.source) recordAffSkip(track.title, track.artist);
+    if (track.source) {
+      recordAffSkip(track.title, track.artist);
+      sendTasteEvent(getAnonymousId(), track.id, "skip");
+    }
   }, []);
 
   const player = useAudioPlayer([], 0, {
@@ -120,7 +156,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     if (!track) return;
     recordHistoryTrack(track);
-    if (track.source) recordAffPlay(track.title, track.artist);
+    if (track.source) {
+      recordAffPlay(track.title, track.artist);
+      sendTasteEvent(getAnonymousId(), track.id, "play");
+    }
   }, [track]);
 
   return (
