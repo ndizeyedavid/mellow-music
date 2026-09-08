@@ -1,14 +1,14 @@
 # Web framework
-fastapi
+fastapi[standard]
 uvicorn[standard]
-flask
-flask-sock
-gevent
-jinja2
 
-# Database
-mysql-connector-python
-pooledMySQL
+# Database - Postgres + vector
+psycopg[binary]
+pgvector
+
+# Embeddings (all-MiniLM-L6-v2, 384 dims)
+sentence-transformers
+torch --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Music APIs
 yt-dlp
@@ -24,5 +24,6 @@ autoReRun
 cryptography
 bidict
 
-# HTTP
+# HTTP / Cache
 requests
+redis

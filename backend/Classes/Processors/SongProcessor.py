@@ -5,7 +5,7 @@ from time import sleep
 
 
 from customisedLogs import CustomisedLogs
-from pooledMySQL import PooledMySQL
+from Classes.Processors.PostgresPool import PostgresPool
 from randomisedString import RandomisedString
 
 
@@ -21,13 +21,15 @@ class SongCache:
     """
     Processor to collect, renew and handle local and DB caches for all song data
     """
-    def __init__(self, SQLConn:PooledMySQL, Logger:CustomisedLogs, URLHandler:URLHandler):
+    def __init__(self, SQLConn:PostgresPool, Logger:CustomisedLogs, URLHandler:URLHandler):
         self.SQLConn = SQLConn
         self.logger = Logger
         self.cache:dict[str, SongData] = {}
         self.YTDLP = YTDLP(self.logger)
         self.SpotifyAPICollection = SpotifyAPICollection(self.SQLConn)
         self.URLHandler = URLHandler
+        # Lazy embedding service (loads model on first use)
+        self._embedder = None
 
     @staticmethod
     def __db_value(value):
@@ -162,10 +164,37 @@ class SongCache:
         except Exception as exc:
             self.__fail_fetch(song, f"Could not save song: {exc}")
             return
+        # Async embedding for vector search (non-blocking, best-effort)
+        try:
+            Thread(target=self.__ensure_embedding, args=(song.song_id, song.song_name), daemon=True).start()
+        except Exception:
+            pass
         if song.waiter is not None:
             song.waiter.set()
             song.waiter = None
         Thread(target=self.__remove_cache, args=(song,)).start()
+
+    def __ensure_embedding(self, song_id: str, song_name: str):
+        """Generate embedding if missing (lazy, runs in background)."""
+        try:
+            if self._embedder is None:
+                from Classes.Processors.EmbeddingService import EmbeddingService
+
+                self._embedder = EmbeddingService(self.SQLConn, self.logger)
+            # Extract artist from song_name if it contains " - "
+            title = song_name
+            artist = ""
+            if " - " in song_name:
+                artist, _, title = song_name.partition(" - ")
+                # Actually song_name is stored as title; need to handle
+                # Our storage is just song_name, not split. Use heuristic:
+                # If original had artist, it would be in song_name as "Title - Artist"?
+                # For now, use full name as text.
+                title = song_name
+                artist = ""
+            self._embedder.ensure_embedding(song_id, title, artist)
+        except Exception:
+            pass
 
 
     def __cache_from_db(self, songID:str, asRepeat) -> SongData | None:
