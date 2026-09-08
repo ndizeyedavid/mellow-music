@@ -4,7 +4,7 @@ import NProgress from "nprogress";
 import "nprogress/nprogress.css";
 import "./index.css";
 import App from "./App.tsx";
-import { Analytics } from "@vercel/analytics/next";
+import { Analytics } from "@vercel/analytics/react";
 
 NProgress.configure({ showSpinner: false });
 
