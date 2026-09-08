@@ -1,8 +1,8 @@
-# Web framework
+# Web framework (fastapi[standard] provides the `fastapi` CLI the platform boots with)
 fastapi[standard]
 uvicorn[standard]
 
-# Database - Postgres + vector
+# Database - Postgres + vector (vector branch primary)
 psycopg[binary]
 pgvector
 
@@ -10,20 +10,25 @@ pgvector
 sentence-transformers
 torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Music APIs
-yt-dlp
-spotipy
+# Legacy MySQL (kept for fallback during cutover, can be removed)
+mysql-connector-python==26.7.0
+
+# Music APIs (yt-dlp floats forward for YouTube bot-fix updates)
+yt-dlp>=2026.8.19
+spotipy==2.26.0
 
 # Custom packages
-customisedLogs
-rateLimitedQueues
-randomisedString
-autoReRun
+customisedLogs==2.0.3
+rateLimitedQueues==0.0.3.post1
+randomisedString==1.4.1
+autoReRun==1.3.0
 
 # Security / crypto
-cryptography
-bidict
+cryptography==50.0.1
 
 # HTTP / Cache
-requests
-redis
+requests==2.34.2
+redis==8.1.0
+
+# Transitive pin: colr<=0.9.0 breaks on Python 3.13 (typing.io removed).
+colr==0.9.1

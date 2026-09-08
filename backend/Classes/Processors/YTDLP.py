@@ -78,6 +78,10 @@ class YTDLP:
                        'quiet': True,
                        'no_warnings': True,
                        'default_search': 'auto',
+                       'retries': 2,
+                       'extractor_retries': 2,
+                       'socket_timeout': 15,
+                       'extractor_args': {'youtube': {'player_client': ['android']}},
                        'js_runtimes': {'node': {}}}),
             YoutubeDL({'extract_flat': True,
                        'skip_download': True,
@@ -85,13 +89,33 @@ class YTDLP:
                        'quiet': True,
                        'no_warnings': True,
                        'default_search': 'auto',
+                       'retries': 2,
+                       'extractor_retries': 2,
+                       'socket_timeout': 15,
                        'js_runtimes': {'node': {}}})
         ]
+        # Optional base64-encoded Netscape cookie file for YouTube, so hosts
+        # that cannot receive the YT-COOKIES file (gitignored) can still get
+        # it through the YT_COOKIES_B64 environment variable.
+        cookie_b64 = (os.getenv("YT_COOKIES_B64") or "").strip()
+        if cookie_b64:
+            try:
+                import base64
+                Files.COOKIE.YT.parent.mkdir(parents=True, exist_ok=True)
+                Files.COOKIE.YT.write_bytes(base64.b64decode(cookie_b64))
+            except Exception:
+                pass
+        proxy = (os.getenv("YTDLP_PROXY") or "").strip() or None
         for downloader in self.downloaders + self.searchDownloaders:
             try:
                 cookies.load_cookies(Files.COOKIE.YT, None, downloader)
             except Exception:
                 pass
+            if proxy:
+                try:
+                    downloader.params["proxy"] = proxy
+                except Exception:
+                    pass
 
 
     def get_downloader(self, stringValue:str):
@@ -824,3 +848,176 @@ class YTDLP:
         if results:
             self._cache_set(cache_key, results, cache_ttl_seconds)
         return results[:limit]
+
+    # ------------------------------------------------------------------
+    # Bot-check resilience: Deezer canonical metadata + previews, optional
+    # cookies (YT_COOKIES_B64) and proxy (YTDLP_PROXY) for yt-dlp traffic.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clean_name(value:str) -> str:
+        import re
+        text = (value or "").lower()
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _names_match(self, title_a:str, artist_a:str, title_b:str, artist_b:str) -> bool:
+        """True when titles overlap AND artists overlap (rejects wrong versions)."""
+        ta, tb = self._clean_name(title_a), self._clean_name(title_b)
+        aa, ab = self._clean_name(artist_a), self._clean_name(artist_b)
+        if not ta or not tb:
+            return False
+        title_ok = ta == tb or (len(ta) >= 4 and ta in tb) or (len(tb) >= 4 and tb in ta)
+        if not aa and not ab:
+            return title_ok
+        artist_ok = bool(aa and ab) and (aa == ab or aa in ab or ab in aa)
+        return bool(title_ok and artist_ok)
+
+    @staticmethod
+    def _duration_to_seconds(value) -> int:
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+        if isinstance(value, str) and ":" in value:
+            try:
+                parts = [int(p) for p in value.strip().split(":")]
+                total = 0
+                for part in parts:
+                    total = total * 60 + part
+                return total if total > 0 else 0
+            except (ValueError, AttributeError):
+                return 0
+        return 0
+
+    def deezer_track_meta(self, query:str) -> dict | None:
+        """
+        Canonical metadata for a search string: title, artist, cover,
+        duration, 30s preview and Deezer track id. None when nothing matches.
+        """
+        query = (query or "").strip()
+        if not query:
+            return None
+        cache_key = f"dz:meta:{query.lower()}"
+        cached = self._memo_get(cache_key, 86400)
+        if cached:
+            return cached
+        try:
+            import requests
+            url = f"{self.DEEZER_API}/search/track?q={requests.utils.quote(query)}&limit=5"
+            data = self._request_json(url, timeout=12)
+            items = (data.get("data") or []) if isinstance(data, dict) else []
+            if not items:
+                return None
+            if " - " in query:
+                artist_guess, _, title_guess = query.partition(" - ")
+            else:
+                artist_guess, title_guess = "", query
+            chosen = None
+            for item in items:
+                artist = item.get("artist") or {}
+                artist_name = artist.get("name") if isinstance(artist, dict) else ""
+                if self._names_match(title_guess or query, artist_guess, item.get("title") or "", artist_name or ""):
+                    chosen = item
+                    break
+            if chosen is None:
+                first = items[0]
+                artist = first.get("artist") or {}
+                artist_name = artist.get("name") if isinstance(artist, dict) else ""
+                if " - " not in query and self._clean_name(query) in self._clean_name(first.get("title") or ""):
+                    chosen = first
+            if chosen is None:
+                return None
+            artist = chosen.get("artist") or {}
+            album = chosen.get("album") or {}
+            meta = {
+                "title": chosen.get("title") or chosen.get("title_short") or query,
+                "artist": artist.get("name") if isinstance(artist, dict) else "Unknown Artist",
+                "cover": album.get("cover_big") or album.get("cover_medium") or "",
+                "duration": chosen.get("duration") or 0,
+                "preview": chosen.get("preview") or "",
+                "deezer_id": str(chosen.get("id") or ""),
+            }
+            self._cache_set(cache_key, meta, 86400)
+            return meta
+        except Exception:
+            return None
+
+    def deezer_preview(self, deezer_id:str) -> dict | None:
+        """Refresh a 30s preview URL for a Deezer track id."""
+        deezer_id = (deezer_id or "").strip()
+        if not deezer_id:
+            return None
+        try:
+            data = self._request_json(f"{self.DEEZER_API}/track/{deezer_id}", timeout=12)
+            if not data or not isinstance(data, dict) or not data.get("preview"):
+                return None
+            return {"audio_url": data["preview"], "duration": 30}
+        except Exception:
+            return None
+
+    # --- Invidious fallback (no Google IP, no yt-dlp) ---
+
+    INVIDIOUS = [
+        "https://iv.melmac.space",
+        "https://y.com.sb",
+        "https://invidious.privacydev.net",
+        "https://inv.nadeko.net",
+    ]
+
+    def invidious_search(self, query:str, max_results:int=5) -> list[dict]:
+        query = (query or "").strip()
+        if not query:
+            return []
+        import requests as _rq
+        for base in self.INVIDIOUS:
+            try:
+                data = self._request_json(
+                    f"{base}/api/v1/search?q={_rq.utils.quote(query)}&type=video",
+                    timeout=12,
+                )
+                if not isinstance(data, list) or not data:
+                    continue
+                results = []
+                for item in data[:max_results]:
+                    vid = item.get("videoId") or item.get("id")
+                    if not vid:
+                        continue
+                    results.append({
+                        "id": str(vid),
+                        "title": item.get("title") or "Unknown Title",
+                        "artist": item.get("author") or "Unknown Artist",
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                        "duration": item.get("lengthSeconds") or 0,
+                        "url": f"https://www.youtube.com/watch?v={vid}",
+                    })
+                if results:
+                    return results
+            except Exception:
+                continue
+        return []
+
+    def invidious_streams(self, video_id:str) -> dict | None:
+        video_id = (video_id or "").strip()
+        if not video_id:
+            return None
+        for base in self.INVIDIOUS:
+            try:
+                data = self._request_json(f"{base}/api/v1/videos/{video_id}", timeout=12)
+                if not isinstance(data, dict):
+                    continue
+                adaptive = data.get("adaptiveFormats") or []
+                best:dict | None = None
+                for fmt in adaptive:
+                    if "audio" not in (fmt.get("type") or ""):
+                        continue
+                    if best is None or (fmt.get("bitrate") or 0) > (best.get("bitrate") or 0):
+                        best = fmt
+                if best and best.get("url"):
+                    return {
+                        "audio_url": best["url"],
+                        "duration": data.get("lengthSeconds") or 0,
+                        "title": data.get("title") or "",
+                        "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                    }
+            except Exception:
+                continue
+        return None

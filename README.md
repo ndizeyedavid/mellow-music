@@ -213,8 +213,6 @@ From the project root, activate the environment and start the API server:
 # PowerShell
 (Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned)
 & ".\.venv\Scripts\Activate.ps1"
-$env:REDIS_URL = "redis://localhost:6379"
-$env:MELLOW_REDIS_URL = "redis://localhost:6379"
 & ".\.venv\Scripts\python.exe" -m uvicorn backend._server:app --host 0.0.0.0 --port 10020
 ```
 
